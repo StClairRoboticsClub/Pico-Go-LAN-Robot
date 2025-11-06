@@ -15,7 +15,9 @@ from config import (
     WIFI_SSID,
     WIFI_PASSWORD,
     WIFI_TIMEOUT_MS,
-    WIFI_RETRY_DELAY_MS
+    WIFI_RETRY_DELAY_MS,
+    MDNS_HOSTNAME,
+    MDNS_ENABLED
 )
 from utils import debug_print, format_ip, time_diff_ms
 
@@ -53,6 +55,11 @@ class WiFiManager:
                 self.ip = self.wlan.ifconfig()[0]
                 self.rssi = self._get_rssi()
                 debug_print(f"Connected! IP: {self.ip}, RSSI: {self.rssi} dBm", force=True)
+                
+                # Setup mDNS if enabled
+                if MDNS_ENABLED:
+                    self._setup_mdns()
+                
                 return self.ip
             
             retry_count += 1
@@ -85,6 +92,22 @@ class WiFiManager:
         except Exception as e:
             debug_print(f"Connection error: {e}")
             return False
+    
+    def _setup_mdns(self):
+        """
+        Setup mDNS responder for hostname-based discovery.
+        Allows robot to be found as picogo1.local, picogo2.local, etc.
+        """
+        try:
+            import network
+            mdns = network.mDNS()
+            mdns.start(MDNS_HOSTNAME, "MicroPython Robot")
+            mdns.add_service('_robot', '_udp', 8765, txt='robot')
+            debug_print(f"mDNS enabled: {MDNS_HOSTNAME}.local", force=True)
+        except ImportError:
+            debug_print("mDNS not available on this MicroPython version", force=True)
+        except Exception as e:
+            debug_print(f"mDNS setup error: {e}", force=True)
     
     def _get_rssi(self):
         """

@@ -39,16 +39,16 @@
 
 ```bash
 # Start hotspot
-sudo ./setup_hotspot.sh start
+sudo ./scripts/setup_hotspot.sh start
 
 # Check status
-./setup_hotspot.sh status
+./scripts/setup_hotspot.sh status
 
 # Stop hotspot
-sudo ./setup_hotspot.sh stop
+sudo ./scripts/setup_hotspot.sh stop
 
 # Scan for connected devices
-sudo ./setup_hotspot.sh scan
+sudo ./scripts/setup_hotspot.sh scan
 ```
 
 ### Method 2: Manual Setup via NetworkManager
@@ -138,7 +138,7 @@ mpremote connect /dev/ttyACM0
 
 ```bash
 # Using setup script
-sudo ./setup_hotspot.sh scan
+sudo ./scripts/setup_hotspot.sh scan
 
 # Manual nmap scan
 sudo nmap -sn 10.42.0.0/24
@@ -278,7 +278,7 @@ iperf3 -s
 **Symptoms**: Robot LCD shows "BOOT" but never "NET UP"
 
 **Checks**:
-1. Verify hotspot is active: `./setup_hotspot.sh status`
+1. Verify hotspot is active: `./scripts/setup_hotspot.sh status`
 2. Check SSID/password in `firmware/config.py`
 3. Verify Pico W (not regular Pico): Look for Wi-Fi chip
 4. Check serial output: `mpremote connect /dev/ttyACM0`
@@ -339,7 +339,7 @@ sudo iw dev wlan0 station dump | grep signal
 - Reduce Wi-Fi interference (turn off Bluetooth)
 - Change Wi-Fi channel to less congested one:
   ```bash
-  # Edit setup_hotspot.sh
+  # Edit scripts/setup_hotspot.sh
   CHANNEL="6"  # Try 1, 6, or 11
   ```
 - Disable power saving: `sudo iw dev wlan0 set power_save off`

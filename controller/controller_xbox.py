@@ -14,14 +14,25 @@ Requirements:
     - asyncio (built-in)
 
 Usage:
-    python3 controller_xbox.py [robot_ip]
+    python3 controller_xbox.py                     # Auto-discover robots (recommended)
+    python3 controller_xbox.py [robot_ip_or_hostname]  # Manual connection
+    
+Examples:
+    python3 controller_xbox.py                     # Scan network and choose robot
+    python3 controller_xbox.py 10.145.146.98       # Connect by IP
+    python3 controller_xbox.py picogo1             # Connect by hostname
+    python3 controller_xbox.py picogo2.local       # Connect by full hostname
 """
 
 import asyncio
 import json
 import time
 import sys
-from typing import Optional
+import socket
+import os
+import struct
+import subprocess
+from typing import Optional, List, Dict
 
 import pygame
 
@@ -30,7 +41,7 @@ import pygame
 # CONFIGURATION
 # ============================================================================
 
-DEFAULT_ROBOT_IP = "10.42.0.123"  # Default robot IP (update as needed)
+DEFAULT_ROBOT_IP = "picogo1.local"  # Default robot hostname (works across networks)
 ROBOT_PORT = 8765
 CONTROL_RATE_HZ = 30
 DEAD_ZONE = 0.08
@@ -58,6 +69,241 @@ BUTTON_START = 7
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def get_local_ip() -> str:
+    """
+    Get the local IP address of the WiFi interface (bypass VPNs).
+    
+    Returns:
+        Local IP address string on WiFi network
+    """
+    try:
+        # Get WiFi interface IP directly (works even with VPN)
+        import subprocess
+        result = subprocess.run(['ip', 'addr', 'show', 'wlp8s0'], 
+                              capture_output=True, text=True, timeout=2)
+        # Look for "inet 10.145.146.207/24" pattern
+        for line in result.stdout.split('\n'):
+            if 'inet ' in line and 'scope global' in line:
+                ip = line.strip().split()[1].split('/')[0]
+                return ip
+    except:
+        pass
+    
+    # Fallback: try common WiFi interface names
+    for iface in ['wlan0', 'wlp8s0', 'wlp3s0', 'wlo1']:
+        try:
+            result = subprocess.run(['ip', 'addr', 'show', iface], 
+                                  capture_output=True, text=True, timeout=1)
+            for line in result.stdout.split('\n'):
+                if 'inet ' in line and 'scope global' in line:
+                    ip = line.strip().split()[1].split('/')[0]
+                    return ip
+        except:
+            continue
+    
+    # Last resort: socket method (may give VPN IP)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except:
+        return "127.0.0.1"
+
+
+def get_network_prefix(ip: str) -> str:
+    """
+    Get network prefix from IP (e.g., 10.145.146.98 -> 10.145.146)
+    
+    Args:
+        ip: IP address string
+    
+    Returns:
+        Network prefix (first 3 octets)
+    """
+    parts = ip.split('.')
+    return '.'.join(parts[:3])
+
+
+def test_robot_connection(ip: str, timeout: float = 1.0) -> bool:
+    """
+    Test if a robot is reachable at the given IP by sending a drive command.
+    
+    Args:
+        ip: Robot IP address to test
+        timeout: How long to wait (seconds)
+    
+    Returns:
+        True if robot is reachable (UDP packet sent successfully)
+    """
+    try:
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_sock.settimeout(timeout)
+        
+        # Send a harmless drive command (all zeros = stop)
+        test_packet = json.dumps({
+            "cmd": "drive",
+            "axes": {"left_y": 0, "right_x": 0},
+            "seq": 0,
+            "ts": int(time.time() * 1000)
+        }).encode()
+        
+        test_sock.sendto(test_packet, (ip, ROBOT_PORT))
+        test_sock.close()
+        return True
+    except:
+        return False
+
+
+def load_cached_robot() -> str:
+    """Load last-used robot IP from cache file."""
+    cache_file = os.path.expanduser("~/.picogo_last_robot")
+    try:
+        with open(cache_file, 'r') as f:
+            return f.read().strip()
+    except:
+        return None
+
+
+def save_cached_robot(ip: str):
+    """Save robot IP to cache file for next time."""
+    cache_file = os.path.expanduser("~/.picogo_last_robot")
+    try:
+        with open(cache_file, 'w') as f:
+            f.write(ip)
+    except:
+        pass
+
+
+def prompt_for_robot_ip() -> str:
+    """
+    Prompt user to enter robot IP address from LCD display.
+    The robot displays its IP on the LCD screen when it boots.
+    """
+    print("\n📟 Robot IP Entry")
+    print("   The robot displays its IP address on the LCD screen.")
+    print("   Look at the robot's display and enter the IP below.\n")
+    
+    while True:
+        try:
+            ip = input("   Enter robot IP (or 'quit' to exit): ").strip()
+            
+            if ip.lower() in ('quit', 'q', 'exit'):
+                return None
+            
+            # Basic IP validation
+            parts = ip.split('.')
+            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                # Test if robot is reachable
+                print(f"   Testing connection to {ip}...")
+                if test_robot_connection(ip):
+                    print(f"   ✅ Robot reachable at {ip}")
+                    save_cached_robot(ip)
+                    return ip
+                else:
+                    print(f"   ⚠️ Could not connect to robot at {ip}")
+                    retry = input("   Try again? (y/n): ").strip().lower()
+                    if retry != 'y':
+                        return None
+            else:
+                print("   ❌ Invalid IP address format (expected: xxx.xxx.xxx.xxx)")
+                
+        except KeyboardInterrupt:
+            print("\n❌ Cancelled")
+            return None
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
+
+
+def select_robot(robots: List[Dict]) -> str:
+    """
+    Display list of discovered robots and let user select one.
+    Returns the IP address of the selected robot.
+    """
+    if not robots:
+        return None
+    
+    if len(robots) == 1:
+        robot = robots[0]
+        print(f"\n✅ Found 1 robot: #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}")
+        print(f"   Auto-connecting...")
+        return robot['ip']
+    
+    print(f"\n📋 Found {len(robots)} robots:")
+    for i, robot in enumerate(robots, 1):
+        rid = robot['robot_id']
+        hostname = robot['hostname']
+        ip = robot['ip']
+        version = robot.get('version', '?')
+        print(f"   {i}. Robot #{rid} ({hostname}) - {ip} [v{version}]")
+    
+    while True:
+        try:
+            choice = input(f"\nSelect robot (1-{len(robots)}): ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(robots):
+                selected = robots[idx]
+                print(f"✅ Connecting to Robot #{selected['robot_id']} at {selected['ip']}")
+                return selected['ip']
+            else:
+                print(f"❌ Please enter a number between 1 and {len(robots)}")
+        except ValueError:
+            print("❌ Please enter a valid number")
+        except KeyboardInterrupt:
+            print("\n❌ Selection cancelled")
+            return None
+    
+    while True:
+        try:
+            choice = input(f"Select robot [1-{len(robots)}] or 'q' to quit: ").strip()
+            
+            if choice.lower() == 'q':
+                return None
+            
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(robots):
+                selected = robots[choice_num - 1]
+                print(f"\n✅ Selected: {selected['hostname']} ({selected['ip']})")
+                return selected['ip']
+            else:
+                print(f"❌ Please enter a number between 1 and {len(robots)}")
+        except ValueError:
+            print("❌ Invalid input. Enter a number or 'q' to quit.")
+        except KeyboardInterrupt:
+            print("\n\n❌ Cancelled")
+            return None
+
+
+def resolve_robot_address(address: str) -> str:
+    """
+    Resolve robot hostname or IP address.
+    Auto-appends .local if no extension provided.
+    
+    Args:
+        address: Hostname (picogo1) or IP address (10.145.146.98)
+    
+    Returns:
+        Resolved IP address
+    """
+    # If it looks like an IP address, return as-is
+    if address.replace('.', '').isdigit():
+        return address
+    
+    # Auto-append .local if not present
+    if not address.endswith('.local'):
+        address = f"{address}.local"
+    
+    try:
+        print(f"🔍 Resolving {address}...")
+        resolved_ip = socket.gethostbyname(address)
+        print(f"✅ Resolved to {resolved_ip}")
+        return resolved_ip
+    except socket.gaierror:
+        print(f"⚠️  Could not resolve {address}, using as-is")
+        return address
+
 
 def apply_deadzone(value: float, threshold: float = DEAD_ZONE) -> float:
     """
@@ -427,14 +673,45 @@ class ControllerApp:
 
 def main():
     """Main entry point."""
-    # Parse command line arguments
-    robot_ip = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ROBOT_IP
-    
     print("="*60)
     print("🤖 Pico-Go LAN Robot - Xbox Controller")
     print("="*60)
-    print(f"Target Robot IP: {robot_ip}:{ROBOT_PORT}")
-    print(f"Control Rate: {CONTROL_RATE_HZ} Hz")
+    
+    # Check if IP/hostname provided as argument
+    if len(sys.argv) > 1:
+        # Manual mode: connect to specified robot
+        robot_address = sys.argv[1]
+        print(f"\n📍 Manual mode: Connecting to {robot_address}")
+        robot_ip = resolve_robot_address(robot_address)
+        if robot_ip:
+            save_cached_robot(robot_ip)
+    else:
+        # Auto-connect mode: Try cache first, then prompt
+        print("\n🔎 Auto-connect mode: Checking for robot...")
+        
+        # Try cached robot first
+        cached_ip = load_cached_robot()
+        if cached_ip:
+            print(f"   📦 Found cached robot: {cached_ip}")
+            print(f"   Testing connection...")
+            if test_robot_connection(cached_ip):
+                print(f"   ✅ Robot reachable!")
+                robot_ip = cached_ip
+            else:
+                print(f"   ⚠️ Cached robot not reachable")
+                robot_ip = prompt_for_robot_ip()
+        else:
+            print(f"   No cached robot found")
+            robot_ip = prompt_for_robot_ip()
+        
+        if robot_ip is None:
+            print("\n❌ No robot selected. Exiting.")
+            sys.exit(0)
+    
+    print(f"\n{'='*60}")
+    print(f"🎯 Target Robot: {robot_ip}:{ROBOT_PORT}")
+    print(f"📡 Control Rate: {CONTROL_RATE_HZ} Hz")
+    print(f"🔒 Connection: Locked (until robot power cycle)")
     print("="*60 + "\n")
     
     # Create and run application
@@ -442,6 +719,8 @@ def main():
     
     try:
         asyncio.run(app.run())
+    except KeyboardInterrupt:
+        print("\n\n✅ Controller stopped by user")
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
         import traceback

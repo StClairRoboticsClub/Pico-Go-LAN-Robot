@@ -21,7 +21,7 @@ cd Pico-Go-LAN-Robot
 pip install -r controller/requirements.txt
 
 # Create Wi-Fi hotspot
-sudo ./setup_hotspot.sh start
+sudo ./scripts/setup_hotspot.sh start
 ```
 
 **Expected Output:**
@@ -96,7 +96,7 @@ Target Robot IP: 10.42.0.123:8765
 
 ## ✅ Verification Checklist
 
-- [ ] Hotspot shows as active: `./setup_hotspot.sh status`
+- [ ] Hotspot shows as active: `./scripts/setup_hotspot.sh status`
 - [ ] Robot LCD displays IP address
 - [ ] Laptop can ping robot: `ping 10.42.0.123`
 - [ ] Controller detects Xbox controller
@@ -110,7 +110,7 @@ Target Robot IP: 10.42.0.123:8765
 **Robot won't connect to Wi-Fi**
 ```bash
 # Restart hotspot
-sudo ./setup_hotspot.sh restart
+sudo ./scripts/setup_hotspot.sh restart
 # Power cycle robot
 ```
 

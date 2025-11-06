@@ -291,6 +291,7 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
         lcd_display: LCD display instance
     """
     import socket
+    import select
     
     debug_print("Starting UDP server (low latency mode)", force=True)
     
@@ -309,62 +310,78 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
     # Main receive loop
     while True:
         try:
-            # Try to receive data
-            data, addr = sock.recvfrom(1024)
+            # Use select to check if data is available (proper way for non-blocking)
+            ready = select.select([sock], [], [], 0)  # 0 = non-blocking poll
             
-            if not client_connected:
-                debug_print(f"UDP client connected from {addr}", force=True)
-                client_connected = True
-                if lcd_display:
-                    lcd_display.set_state(STATE_CLIENT_OK)
-            
-            try:
-                packet = json.loads(data.decode().strip())
+            if ready[0]:  # If socket has data ready
+                # Receive data
+                data, addr = sock.recvfrom(1024)
                 
-                # Track packet loss
-                seq = packet.get("seq", 0)
-                if seq > last_seq + 1:
-                    packets_lost += seq - last_seq - 1
-                last_seq = seq
-                packets_received += 1
-                
-                cmd = packet.get("cmd")
-                if cmd == "drive":
-                    axes = packet.get("axes", {})
-                    throttle = axes.get("throttle", 0.0)
-                    steer = axes.get("steer", 0.0)
-                    
-                    # DEBUG: Print every 30th packet
-                    if packets_received % 30 == 0:
-                        debug_print(f"Drive cmd: T={throttle:.2f} S={steer:.2f} PKT={packets_received}")
-                    
-                    # Feed watchdog FIRST (critical for safety)
-                    safety_controller.feed_watchdog()
-                    
-                    # Enable motors if needed
-                    if not motor_controller.enabled:
-                        motor_controller.enable()
-                        debug_print("Motors enabled", force=True)
-                    
-                    # Execute drive command
-                    motor_controller.drive(throttle, steer)
-                    
-                    # Update LCD (throttled internally)
+                if not client_connected:
+                    debug_print(f"UDP client connected from {addr}", force=True)
+                    client_connected = True
                     if lcd_display:
-                        lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+                        lcd_display.set_state(STATE_CLIENT_OK)
                 
-            except Exception as e:
-                debug_print(f"Packet processing error: {e}")
-        
-        except OSError as e:
-            # No data available (non-blocking socket)
-            # This is expected and normal for non-blocking operations
-            pass
+                try:
+                    packet = json.loads(data.decode().strip())
+                    
+                    # Track packet loss
+                    seq = packet.get("seq", 0)
+                    if seq > last_seq + 1:
+                        packets_lost += seq - last_seq - 1
+                    last_seq = seq
+                    packets_received += 1
+                    
+                    cmd = packet.get("cmd")
+                    if cmd == "discover":
+                        # Respond to broadcast discovery requests
+                        try:
+                            from config import ROBOT_ID, MDNS_HOSTNAME
+                            response = json.dumps({
+                                "type": "robot_info",
+                                "robot_id": ROBOT_ID,
+                                "hostname": MDNS_HOSTNAME,
+                                "version": "1.0"
+                            }) + "\n"
+                            sock.sendto(response.encode(), addr)
+                            debug_print(f"Discovery response sent to {addr}", force=True)
+                        except Exception as e:
+                            debug_print(f"Discovery response error: {e}", force=True)
+                        continue
+                    
+                    elif cmd == "drive":
+                        axes = packet.get("axes", {})
+                        throttle = axes.get("throttle", 0.0)
+                        steer = axes.get("steer", 0.0)
+                        
+                        # DEBUG: Print every 30th packet
+                        if packets_received % 30 == 0:
+                            debug_print(f"Drive cmd: T={throttle:.2f} S={steer:.2f} PKT={packets_received}")
+                        
+                        # Feed watchdog FIRST (critical for safety)
+                        safety_controller.feed_watchdog()
+                        
+                        # Enable motors if needed
+                        if not motor_controller.enabled:
+                            motor_controller.enable()
+                            debug_print("Motors enabled", force=True)
+                        
+                        # Execute drive command
+                        motor_controller.drive(throttle, steer)
+                        
+                        # Update LCD (throttled internally)
+                        if lcd_display:
+                            lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+                    
+                except Exception as e:
+                    debug_print(f"Packet processing error: {e}", force=True)
+            
         except Exception as e:
-            debug_print(f"UDP receive error: {e}")
+            debug_print(f"UDP receive error: {e}", force=True)
         
         # Yield control to other tasks
-        await asyncio.sleep_ms(10)  # 10ms yield = 100 Hz max, but more stable
+        await asyncio.sleep_ms(1)  # 1ms yield for better responsiveness
 
 
 async def handle_tcp_client(reader, writer, motor_controller, safety_controller, lcd_display):

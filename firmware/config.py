@@ -20,6 +20,14 @@ WIFI_RETRY_DELAY_MS = 5000  # 5 seconds between retries
 WEBSOCKET_PORT = 8765
 WEBSOCKET_HOST = "0.0.0.0"  # Listen on all interfaces
 
+# Robot ID Configuration - for multiple robots on same network
+# Change this to a unique number for each robot (1, 2, 3, etc.)
+ROBOT_ID = 1
+
+# mDNS Configuration - allows connection via hostname instead of IP
+MDNS_HOSTNAME = f"picogo{ROBOT_ID}"  # Robot will be accessible as picogo1.local, picogo2.local, etc.
+MDNS_ENABLED = True
+
 # ============================================================================
 # SAFETY & TIMING
 # ============================================================================

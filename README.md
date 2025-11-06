@@ -28,10 +28,10 @@ Perfect for robotics education, competitions, and R&D projects.
 
 ```bash
 # Create the Wi-Fi hotspot
-sudo ./setup_hotspot.sh start
+sudo ./scripts/setup_hotspot.sh start
 
 # Verify it's running
-./setup_hotspot.sh status
+./scripts/setup_hotspot.sh status
 ```
 
 ### 2. Flash Firmware (Pico W)
@@ -136,7 +136,7 @@ sudo apt update
 sudo apt install network-manager python3-pygame
 
 # Setup hotspot
-sudo ./setup_hotspot.sh start
+sudo ./scripts/setup_hotspot.sh start
 ```
 
 ### Step 2: Pico W Firmware
@@ -161,10 +161,10 @@ mpremote reset
 
 ```bash
 # Check hotspot status
-./setup_hotspot.sh status
+./scripts/setup_hotspot.sh status
 
 # Scan for robot
-./setup_hotspot.sh scan
+./scripts/setup_hotspot.sh scan
 
 # Monitor Pico serial output
 mpremote connect /dev/ttyACM0
@@ -215,12 +215,17 @@ Pico-Go-LAN-Robot/
 ├── controller/           # Python controller application
 │   ├── controller_xbox.py
 │   └── requirements.txt
+├── scripts/              # Utility scripts
+│   ├── setup_hotspot.sh  # Ubuntu hotspot management
+│   └── install_lcd_driver.sh
 ├── docs/                 # Documentation
+│   ├── QUICKSTART.md
 │   ├── HARDWARE.md
 │   ├── NETWORKING.md
 │   └── TROUBLESHOOTING.md
-├── schematics/           # Wiring diagrams (future)
-├── setup_hotspot.sh      # Ubuntu hotspot management
+├── examples/             # Reference code from Waveshare
+├── schematics/           # Wiring diagrams
+├── init.md               # Unified context file
 └── README.md
 ```
 
@@ -246,7 +251,7 @@ mpremote connect /dev/ttyACM0
 ping 10.42.0.123
 
 # Check latency
-./setup_hotspot.sh scan
+./scripts/setup_hotspot.sh scan
 ```
 
 ### Controller Test

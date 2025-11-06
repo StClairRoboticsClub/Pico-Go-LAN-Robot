@@ -6,7 +6,7 @@ Before diving into specific issues, run through this checklist:
 
 - [ ] Battery charged and connected properly
 - [ ] Pico W properly seated in headers
-- [ ] Ubuntu hotspot active: `./setup_hotspot.sh status`
+- [ ] Ubuntu hotspot active: `./scripts/setup_hotspot.sh status`
 - [ ] Xbox controller connected and recognized
 - [ ] Firmware uploaded to Pico W
 - [ ] Serial output visible: `mpremote connect /dev/ttyACM0`
@@ -153,7 +153,7 @@ mpremote connect /dev/ttyACM0
 
 1. **Verify hotspot is running**:
    ```bash
-   ./setup_hotspot.sh status
+   ./scripts/setup_hotspot.sh status
    # Should show "Hotspot is ACTIVE"
    ```
 
@@ -188,7 +188,7 @@ mpremote connect /dev/ttyACM0
    ```
 
 4. **Common fixes**:
-   - Restart hotspot: `sudo ./setup_hotspot.sh restart`
+   - Restart hotspot: `sudo ./scripts/setup_hotspot.sh restart`
    - Verify using Pico **W** not regular Pico
    - Re-flash MicroPython firmware
    - Try different Wi-Fi channel in setup script
@@ -327,7 +327,7 @@ mpremote connect /dev/ttyACM0
    ```
 3. **Change Wi-Fi channel**:
    ```bash
-   # Edit setup_hotspot.sh
+   # Edit scripts/setup_hotspot.sh
    CHANNEL="6"  # Try 1, 6, or 11
    ```
 4. **Disable power saving**:
@@ -513,7 +513,7 @@ mpremote reset
 ```bash
 # Delete and recreate hotspot
 sudo nmcli connection delete PicoLAN
-sudo ./setup_hotspot.sh start
+sudo ./scripts/setup_hotspot.sh start
 ```
 
 ### Emergency Motor Stop
