@@ -1,141 +1,279 @@
-# 🤖 Pico-Go LAN Robot
+# 🤖 Pico-Go LAN Robot# 🤖 Pico-Go LAN Robot
 
-**Real-time LAN-controlled sumo robot using Raspberry Pi Pico W and Waveshare Pico-Go v2**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-green.svg)](https://micropython.org/)
 
----
+**Real-time LAN-controlled robot using Raspberry Pi Pico W and Waveshare Pico-Go v2****Real-time LAN-controlled sumo robot using Raspberry Pi Pico W and Waveshare Pico-Go v2**
 
-## 📘 Overview
 
-The **Pico-Go LAN Robot** is a teleoperated robot platform built on the Waveshare Pico-Go v2 chassis, featuring:
 
-- **Real-time control** over local Wi-Fi (no internet required)
-- **Xbox controller** input at 30 Hz via WebSocket/TCP
-- **Automatic fail-safe** - motors stop if connection lost > 200ms
-- **Live status display** on ST7789 LCD
-- **Modular architecture** - easy to extend and customize
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
+[![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-green.svg)](https://micropython.org/)[![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-green.svg)](https://micropython.org/)
+
+
+
+------
+
+
+
+## Overview## 📘 Overview
+
+
+
+A teleoperated robot platform built for education, competitions, and R&D. Control your robot in real-time over WiFi using an Xbox controller.The **Pico-Go LAN Robot** is a teleoperated robot platform built on the Waveshare Pico-Go v2 chassis, featuring:
+
+
+
+**Key Features:**- **Real-time control** over local Wi-Fi (no internet required)
+
+- 🎮 Real-time Xbox controller input (30 Hz)- **Xbox controller** input at 30 Hz via WebSocket/TCP
+
+- 📡 Local WiFi control (no internet required)- **Automatic fail-safe** - motors stop if connection lost > 200ms
+
+- 🛡️ Automatic safety cutoff (200ms timeout)- **Live status display** on ST7789 LCD
+
+- 📺 Live LCD status display with color-coded connection- **Modular architecture** - easy to extend and customize
+
+- 🔧 Modular, extensible codebase
 
 Perfect for robotics education, competitions, and R&D projects.
 
 ---
 
+---
+
+## Quick Start
+
 ## 🎯 Quick Start
+
+### 1. Setup Laptop Hotspot
 
 ### 1. Setup Ubuntu Hotspot (Laptop)
 
 ```bash
-# Create the Wi-Fi hotspot
+
+git clone https://github.com/StClairRoboticsClub/Pico-Go-LAN-Robot.git```bash
+
+cd Pico-Go-LAN-Robot# Create the Wi-Fi hotspot
+
+pip install -r controller/requirements.txtsudo ./scripts/setup_hotspot.sh start
+
 sudo ./scripts/setup_hotspot.sh start
 
-# Verify it's running
+```# Verify it's running
+
 ./scripts/setup_hotspot.sh status
-```
 
-### 2. Flash Firmware (Pico W)
+### 2. Configure & Flash Firmware```
 
-```bash
-# Install MicroPython on Pico W (if not already installed)
-# Download from: https://micropython.org/download/RPI_PICO_W/
 
-# Upload firmware files
-cd firmware
+
+Edit `firmware/config.py` with your WiFi credentials, then:### 2. Flash Firmware (Pico W)
+
+
+
+```bash```bash
+
+pip install mpremote# Install MicroPython on Pico W (if not already installed)
+
+cd firmware# Download from: https://micropython.org/download/RPI_PICO_W/
+
 mpremote connect /dev/ttyACM0 cp *.py :
-mpremote reset
+
+mpremote reset# Upload firmware files
+
+```cd firmware
+
+mpremote connect /dev/ttyACM0 cp *.py :
+
+### 3. Run Controllermpremote reset
+
 ```
 
-### 3. Run Controller (Laptop)
+```bash
+
+python3 controller/controller_xbox.py <robot-ip-from-lcd>### 3. Run Controller (Laptop)
+
+```
 
 ```bash
-# Install dependencies
+
+**Controls:** Left stick Y = forward/reverse, Left stick X = steering# Install dependencies
+
 pip install -r controller/requirements.txt
+
+---
 
 # Connect Xbox controller via USB or Bluetooth
 
+## System Architecture
+
 # Run controller (update robot IP if needed)
-python3 controller/controller_xbox.py 10.42.0.123
-```
 
----
+```python3 controller/controller_xbox.py 10.42.0.123
 
-## 🧩 System Architecture
+[Xbox Controller] ──► [Laptop] ──WiFi──► [Pico W] ──► [Motors]```
 
-```
-┌─────────────────┐
-│ Xbox Controller │
+                                          └──► [LCD Status]
+
+```---
+
+
+
+**Components:**## 🧩 System Architecture
+
+- **Firmware:** MicroPython on Raspberry Pi Pico W
+
+- **Controller:** Python app with pygame for Xbox input```
+
+- **Network:** Ubuntu hotspot (10.42.0.x), TCP/JSON protocol┌─────────────────┐
+
+- **Hardware:** Waveshare Pico-Go v2, TB6612FNG driver, ST7789 LCD│ Xbox Controller │
+
 └────────┬────────┘
-         │ USB/Bluetooth
+
+---         │ USB/Bluetooth
+
          ▼
-┌─────────────────────┐      Wi-Fi LAN       ┌──────────────────┐
+
+## Project Structure┌─────────────────────┐      Wi-Fi LAN       ┌──────────────────┐
+
 │ Laptop Controller   │◄───────────────────►│ Raspberry Pi     │
-│ • Python 3.11       │   10.42.0.x:8765    │ Pico W           │
-│ • pygame            │                      │ • MicroPython    │
-│ • asyncio           │                      │ • Motor Control  │
-└─────────────────────┘                      │ • LCD Display    │
-                                              │ • Safety Systems │
-                                              └──────────────────┘
-```
+
+```│ • Python 3.11       │   10.42.0.x:8765    │ Pico W           │
+
+Pico-Go-LAN-Robot/│ • pygame            │                      │ • MicroPython    │
+
+├── firmware/           # MicroPython code for Pico W│ • asyncio           │                      │ • Motor Control  │
+
+│   ├── main.py        # Entry point└─────────────────────┘                      │ • LCD Display    │
+
+│   ├── config.py      # Hardware/network configuration                                              │ • Safety Systems │
+
+│   ├── motor.py       # Motor control                                              └──────────────────┘
+
+│   ├── wifi.py        # WiFi management```
+
+│   ├── ws_server.py   # TCP server
+
+│   ├── lcd_status.py  # LCD display---
+
+│   ├── watchdog.py    # Safety system
+
+│   └── utils.py       # Helper functions## 🛠️ Hardware Requirements
+
+├── controller/         # Python controller app
+
+│   └── controller_xbox.py| Component | Specification | Notes |
+
+├── scripts/           # Setup utilities|-----------|---------------|-------|
+
+│   ├── setup_hotspot.sh| **Microcontroller** | Raspberry Pi Pico W | RP2040 + CYW43439 Wi-Fi |
+
+│   └── install_lcd_driver.sh| **Platform** | Waveshare Pico-Go v2 | Includes motors, LCD, motor driver |
+
+├── schematics/        # Hardware diagrams| **Motor Driver** | TB6612FNG | Dual H-bridge |
+
+└── docs/| **Display** | ST7789 240×240 LCD | 1.3" SPI display |
+
+    └── GUIDE.md       # 📖 Complete documentation| **Battery** | 7.4V Li-ion | 2S with protection |
+
+```| **Controller** | Xbox Controller | Wired or Bluetooth |
+
+| **Laptop** | Ubuntu 22.04+ | Hosts hotspot + controller app |
 
 ---
-
-## 🛠️ Hardware Requirements
-
-| Component | Specification | Notes |
-|-----------|---------------|-------|
-| **Microcontroller** | Raspberry Pi Pico W | RP2040 + CYW43439 Wi-Fi |
-| **Platform** | Waveshare Pico-Go v2 | Includes motors, LCD, motor driver |
-| **Motor Driver** | TB6612FNG | Dual H-bridge |
-| **Display** | ST7789 240×240 LCD | 1.3" SPI display |
-| **Battery** | 7.4V Li-ion | 2S with protection |
-| **Controller** | Xbox Controller | Wired or Bluetooth |
-| **Laptop** | Ubuntu 22.04+ | Hosts hotspot + controller app |
 
 ### Pin Assignments
 
+## Documentation
+
 **Motor Driver (TB6612FNG)**
-- PWMA: GP0, AIN1: GP1, AIN2: GP2
-- PWMB: GP3, BIN1: GP4, BIN2: GP5
-- STBY: GP6
 
-**LCD (ST7789)**
-- SCK: GP18, MOSI: GP19, DC: GP16
-- RST: GP20, CS: GP17, BL: GP21
+**📖 [Complete Guide](docs/GUIDE.md)** - Everything you need:- PWMA: GP0, AIN1: GP1, AIN2: GP2
 
----
+- Hardware requirements and pin assignments- PWMB: GP3, BIN1: GP4, BIN2: GP5
 
-## 📦 Software Requirements
+- Detailed setup instructions- STBY: GP6
 
-### Firmware (Pico W)
-- MicroPython 1.22+
-- Built-in libraries: `uasyncio`, `network`, `machine`, `json`
-- Optional: `uwebsocket` (for WebSocket support)
+- Software architecture and development
 
-### Controller (Laptop)
-- Python 3.11+
+- Network configuration**LCD (ST7789)**
+
+- Troubleshooting guide- SCK: GP18, MOSI: GP19, DC: GP16
+
+- API reference- RST: GP20, CS: GP17, BL: GP21
+
+
+
+------
+
+
+
+## Hardware Requirements## 📦 Software Requirements
+
+
+
+| Component | Specification | Cost |### Firmware (Pico W)
+
+|-----------|---------------|------|- MicroPython 1.22+
+
+| Raspberry Pi Pico W | RP2040 + WiFi | $6 |- Built-in libraries: `uasyncio`, `network`, `machine`, `json`
+
+| Waveshare Pico-Go v2 | Platform + motors + LCD | $25 |- Optional: `uwebsocket` (for WebSocket support)
+
+| Li-ion Battery | 7.4V 2S 1000mAh+ | $15 |
+
+| Xbox Controller | USB or Bluetooth | $30-60 |### Controller (Laptop)
+
+| **Total** | | **~$75-100** |- Python 3.11+
+
 - pygame >= 2.5
-- asyncio (built-in)
 
----
+---- asyncio (built-in)
 
-## 🚀 Installation Guide
 
-### Step 1: Laptop Setup
 
-```bash
+## License---
+
+
+
+MIT License## 🚀 Installation Guide
+
+
+
+**Author:** Jeremy Dueck  ### Step 1: Laptop Setup
+
+**Organization:** St. Clair College Robotics Club  
+
+**Repository:** https://github.com/StClairRoboticsClub/Pico-Go-LAN-Robot```bash
+
 # Clone repository
-git clone https://github.com/StClairRoboticsClub/Pico-Go-LAN-Robot.git
+
+---git clone https://github.com/StClairRoboticsClub/Pico-Go-LAN-Robot.git
+
 cd Pico-Go-LAN-Robot
 
+## Contributing
+
 # Install Python dependencies
-pip install -r controller/requirements.txt
 
-# Install system packages (Ubuntu)
-sudo apt update
-sudo apt install network-manager python3-pygame
+Contributions welcome! Please:pip install -r controller/requirements.txt
 
-# Setup hotspot
+1. Fork the repository
+
+2. Create a feature branch# Install system packages (Ubuntu)
+
+3. Make your changes and test thoroughlysudo apt update
+
+4. Submit a pull requestsudo apt install network-manager python3-pygame
+
+
+
+For bugs and feature requests, open an issue on GitHub.# Setup hotspot
+
 sudo ./scripts/setup_hotspot.sh start
 ```
 
