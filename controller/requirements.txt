@@ -1,0 +1,12 @@
+# Python Requirements for Pico-Go LAN Robot Controller
+# Ubuntu 22.04+ with Python 3.11+
+
+# Core dependencies
+pygame>=2.5.0
+asyncio-compat>=0.1.2
+
+# Optional: Development tools
+mpremote>=1.21.0
+
+# Optional: Network diagnostics
+scapy>=2.5.0
