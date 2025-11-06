@@ -318,10 +318,14 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed solutions.
 
 ## 📚 Documentation
 
+- [Quick Start Guide](docs/QUICKSTART.md) - 5-minute setup walkthrough
 - [Hardware Guide](docs/HARDWARE.md) - Wiring, assembly, power
 - [Networking Guide](docs/NETWORKING.md) - LAN setup, troubleshooting
+- [LCD Display Guide](docs/LCD_GUIDE.md) - Display states and indicators
+- [Multi-Robot Setup](docs/MULTI_ROBOT_SETUP.md) - Running multiple robots
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Advanced development reference
+- [Engineering Reference](docs/REFERENCE.md) - Complete technical specifications
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common problems & solutions
-- [Engineering Reference](PicoGo-LAN-Robot_EngineeringReference_v2.md) - Complete technical specs
 
 ---
 
