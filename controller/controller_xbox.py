@@ -229,8 +229,8 @@ def discover_robots_on_network(timeout: float = 3.0) -> List[Dict]:
             except:
                 pass
             
-            # Also scan common robot IPs directly
-            for last_octet in range(50, 151):
+            # Also scan common robot IPs directly (expanded range to include DHCP addresses)
+            for last_octet in range(1, 255):
                 target_ip = f"{network_prefix}.{last_octet}"
                 try:
                     sock.sendto(discovery_msg, (target_ip, ROBOT_PORT))

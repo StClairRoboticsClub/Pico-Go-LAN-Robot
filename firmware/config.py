@@ -12,8 +12,8 @@ License: MIT
 # NETWORK CONFIGURATION
 # ============================================================================
 
-WIFI_SSID = "Pixel_6625"  # Phone hotspot
-WIFI_PASSWORD = "Test123)("  # Phone hotspot password
+WIFI_SSID = "DevNet-2.4G"  # Phone hotspot
+WIFI_PASSWORD = "DevPass**99"  # Phone hotspot password
 WIFI_TIMEOUT_MS = 15000  # 15 seconds to connect
 WIFI_RETRY_DELAY_MS = 5000  # 5 seconds between retries
 
