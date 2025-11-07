@@ -47,6 +47,12 @@ CONTROL_RATE_HZ = 30
 DEAD_ZONE = 0.08
 RECONNECT_DELAY = 1.0
 
+# Input shaping configuration (per driver experience report)
+THROTTLE_EXPO = 2.0  # 1.0=linear, 2.0=quadratic, 3.0=cubic (smoother at low inputs)
+STEERING_EXPO = 1.5  # Less aggressive expo for steering (more precision)
+THROTTLE_SENSITIVITY = 1.0  # Overall throttle multiplier (0.0 to 1.0)
+STEERING_SENSITIVITY = 0.6  # Overall steering multiplier (0.0 to 1.0)
+
 # Xbox controller axis mappings (SDL2)
 AXIS_LEFT_X = 0  # Left stick horizontal
 AXIS_LEFT_Y = 1  # Left stick vertical
@@ -129,14 +135,14 @@ def get_network_prefix(ip: str) -> str:
 
 def test_robot_connection(ip: str, timeout: float = 1.0) -> bool:
     """
-    Test if a robot is reachable at the given IP by sending a drive command.
+    Test if a robot is reachable at the given IP by sending a test packet.
     
     Args:
         ip: Robot IP address to test
         timeout: How long to wait (seconds)
     
     Returns:
-        True if robot is reachable (UDP packet sent successfully)
+        True if robot is reachable and responds
     """
     try:
         test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -153,8 +159,139 @@ def test_robot_connection(ip: str, timeout: float = 1.0) -> bool:
         test_sock.sendto(test_packet, (ip, ROBOT_PORT))
         test_sock.close()
         return True
-    except:
+    except Exception as e:
         return False
+
+
+def get_all_local_networks() -> List[str]:
+    """
+    Get all local network prefixes (excluding loopback and docker).
+    
+    Returns:
+        List of network prefixes like ['10.42.0', '192.168.1', '10.55.81']
+    """
+    networks = []
+    try:
+        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=2)
+        
+        for line in result.stdout.split('\n'):
+            # Look for inet lines with scope global
+            if 'inet ' in line and 'scope global' in line:
+                ip = line.strip().split()[1].split('/')[0]
+                # Skip loopback, docker, and VPN tunnels
+                if not ip.startswith(('127.', '172.17.', '172.18.', '100.')):
+                    prefix = get_network_prefix(ip)
+                    if prefix not in networks:
+                        networks.append(prefix)
+    except:
+        pass
+    
+    # Fallback: common robot networks
+    if not networks:
+        networks = ['10.42.0', '192.168.1', '192.168.4']
+    
+    return networks
+
+
+def discover_robots_on_network(timeout: float = 3.0) -> List[Dict]:
+    """
+    Broadcast discovery request and collect robot responses.
+    Scans ALL local network interfaces to find robots.
+    
+    Args:
+        timeout: How long to wait for responses (seconds)
+    
+    Returns:
+        List of robot info dicts with 'robot_id', 'hostname', 'ip', 'version'
+    """
+    print(f"🔍 Broadcasting discovery request...")
+    
+    robots = []
+    
+    try:
+        # Create UDP socket for broadcast
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.5)  # 500ms timeout for receives
+        
+        # Get ALL local networks (not just one!)
+        networks = get_all_local_networks()
+        print(f"   Scanning networks: {', '.join(networks)}")
+        
+        # Send discovery to all networks
+        discovery_msg = json.dumps({"cmd": "discover", "seq": 0}).encode()
+        
+        for network_prefix in networks:
+            # Try broadcast first
+            broadcast_addr = f"{network_prefix}.255"
+            try:
+                sock.sendto(discovery_msg, (broadcast_addr, ROBOT_PORT))
+            except:
+                pass
+            
+            # Also scan common robot IPs directly
+            for last_octet in range(50, 151):
+                target_ip = f"{network_prefix}.{last_octet}"
+                try:
+                    sock.sendto(discovery_msg, (target_ip, ROBOT_PORT))
+                except:
+                    pass
+        
+        print(f"   Listening for responses...")
+        
+        # Collect responses
+        start_time = time.time()
+        seen_ips = set()
+        
+        while time.time() - start_time < timeout:
+            try:
+                data, addr = sock.recvfrom(1024)
+                response = json.loads(data.decode().strip())
+                
+                robot_ip = addr[0]
+                
+                # Avoid duplicates
+                if robot_ip in seen_ips:
+                    continue
+                seen_ips.add(robot_ip)
+                
+                if response.get("type") == "robot_info":
+                    robot_info = {
+                        "robot_id": response.get("robot_id", "?"),
+                        "hostname": response.get("hostname", "unknown"),
+                        "ip": robot_ip,
+                        "version": response.get("version", "?"),
+                        "color": response.get("color", [255, 255, 255])  # RGB tuple
+                    }
+                    robots.append(robot_info)
+                    
+                    # Format color display
+                    color_rgb = robot_info['color']
+                    color_str = f"RGB({color_rgb[0]},{color_rgb[1]},{color_rgb[2]})"
+                    
+                    # Try to get ANSI color for terminal display
+                    try:
+                        ansi_color = f"\033[38;2;{color_rgb[0]};{color_rgb[1]};{color_rgb[2]}m●\033[0m"
+                    except:
+                        ansi_color = "●"
+                    
+                    print(f"   ✅ Found: {ansi_color} Robot #{robot_info['robot_id']} ({robot_info['hostname']}) at {robot_ip} - {color_str}")
+            
+            except socket.timeout:
+                continue
+            except Exception as e:
+                continue
+        
+        sock.close()
+        
+        elapsed = time.time() - start_time
+        print(f"   Discovery complete: {len(robots)} robot(s) found in {elapsed:.1f}s\n")
+        
+        return robots
+    
+    except Exception as e:
+        print(f"   ❌ Discovery error: {e}")
+        return []
 
 
 def load_cached_robot() -> str:
@@ -217,6 +354,75 @@ def prompt_for_robot_ip() -> str:
             print(f"   ❌ Error: {e}")
 
 
+def discover_and_select_robot() -> str:
+    """
+    Discover robots on network and let user select one.
+    
+    Returns:
+        Robot IP address or None
+    """
+    print("\n" + "="*60)
+    print("🤖 ROBOT DISCOVERY")
+    print("="*60)
+    
+    # Discover robots using UDP broadcast
+    robots = discover_robots_on_network(timeout=3.0)
+    
+    if len(robots) == 0:
+        # No robots found
+        print("❌ No robots found on network\n")
+        print("   Troubleshooting:")
+        print("   1. Is the robot powered on?")
+        print("   2. Is the robot connected to WiFi? (Check LCD)")
+        print("   3. Are you on the same network?")
+        print("   4. Check robot's IP address on LCD screen\n")
+        
+        # Offer manual entry
+        manual = input("   Enter IP manually? (y/n): ").strip().lower()
+        if manual == 'y':
+            return prompt_for_robot_ip()
+        return None
+    
+    elif len(robots) == 1:
+        # Exactly one robot found - auto-select
+        robot = robots[0]
+        print(f"✅ Found 1 robot:")
+        print(f"   Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}")
+        print(f"   Auto-connecting...\n")
+        save_cached_robot(robot['ip'])
+        return robot['ip']
+    
+    else:
+        # Multiple robots found - let user choose
+        print(f"📋 Found {len(robots)} robots:\n")
+        for i, robot in enumerate(robots, 1):
+            print(f"   {i}. Robot #{robot['robot_id']} ({robot['hostname']}) - {robot['ip']}")
+        
+        print()
+        
+        while True:
+            try:
+                choice = input(f"Select robot (1-{len(robots)}) or 'q' to quit: ").strip()
+                
+                if choice.lower() == 'q':
+                    return None
+                
+                idx = int(choice) - 1
+                if 0 <= idx < len(robots):
+                    robot = robots[idx]
+                    print(f"\n✅ Selected: Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}\n")
+                    save_cached_robot(robot['ip'])
+                    return robot['ip']
+                else:
+                    print(f"❌ Please enter a number between 1 and {len(robots)}")
+            
+            except ValueError:
+                print("❌ Please enter a valid number or 'q'")
+            except KeyboardInterrupt:
+                print("\n❌ Cancelled")
+                return None
+
+
 def select_robot(robots: List[Dict]) -> str:
     """
     Display list of discovered robots and let user select one.
@@ -237,7 +443,15 @@ def select_robot(robots: List[Dict]) -> str:
         hostname = robot['hostname']
         ip = robot['ip']
         version = robot.get('version', '?')
-        print(f"   {i}. Robot #{rid} ({hostname}) - {ip} [v{version}]")
+        color_rgb = robot.get('color', [255, 255, 255])
+        
+        # Try to display color indicator using ANSI escape codes
+        try:
+            ansi_color = f"\033[38;2;{color_rgb[0]};{color_rgb[1]};{color_rgb[2]}m●\033[0m"
+        except:
+            ansi_color = "●"
+        
+        print(f"   {i}. {ansi_color} Robot #{rid} ({hostname}) - {ip} [v{version}]")
     
     while True:
         try:
@@ -330,6 +544,40 @@ def clamp(value: float, min_val: float = -1.0, max_val: float = 1.0) -> float:
     return max(min_val, min(max_val, value))
 
 
+def apply_expo(value: float, expo: float = 2.0) -> float:
+    """
+    Apply exponential curve to input value for smoother control at low inputs.
+    
+    This makes small stick movements produce proportionally smaller outputs,
+    while maintaining full range at extremes. Addresses the "twitchy" feel
+    mentioned in the driver experience report.
+    
+    Args:
+        value: Input value (-1.0 to 1.0)
+        expo: Exponent (1.0=linear, 2.0=quadratic, 3.0=cubic)
+              Higher values = smoother at low inputs, more aggressive at high
+    
+    Returns:
+        Value with expo curve applied (-1.0 to 1.0)
+    
+    Example:
+        Linear (expo=1.0): 0.3 input -> 0.3 output (30% PWM)
+        Quadratic (expo=2.0): 0.3 input -> 0.09 output (9% PWM)
+        Cubic (expo=3.0): 0.3 input -> 0.027 output (2.7% PWM)
+    """
+    if abs(value) < 0.001:
+        return 0.0
+    
+    # Preserve sign, apply expo to magnitude
+    sign = 1.0 if value > 0 else -1.0
+    magnitude = abs(value)
+    
+    # Apply exponential curve
+    shaped = pow(magnitude, expo)
+    
+    return sign * shaped
+
+
 # ============================================================================
 # CONTROLLER INPUT HANDLER
 # ============================================================================
@@ -346,9 +594,6 @@ class XboxController:
         
         self.joystick: Optional[pygame.joystick.Joystick] = None
         self.connected = False
-        self.reverse_mode = False  # False = Forward, True = Reverse
-        self.lb_pressed_last = False  # Track LB button state for toggle
-        
         self._initialize_controller()
     
     def _initialize_controller(self):
@@ -374,9 +619,14 @@ class XboxController:
         Get throttle and steering values from controller.
         
         Uses:
-        - Left Bumper (LB): Toggle forward/reverse mode
-        - Right trigger (axis 5): Throttle (0 to 1)
-        - Left stick X (axis 0): Steering (-1 to 1)
+        - Right trigger (axis 5): Forward throttle (0 to 1)
+        - Left trigger (axis 4): Reverse throttle (0 to 1)
+        - Left stick X (axis 0): Steering (-1 to 1, right = clockwise)
+        
+        Trigger behavior:
+        - Released: axis = -1.0 -> output = 0.0 (no motion)
+        - Half pressed: axis = 0.0 -> output = 0.5
+        - Fully pressed: axis = 1.0 -> output = 1.0
         
         Returns:
             (throttle, steer) tuple, each in range -1.0 to 1.0
@@ -387,34 +637,43 @@ class XboxController:
         # Update pygame events to get latest joystick state
         pygame.event.pump()
         
-        # Check for LB button toggle
-        lb_pressed = self.joystick.get_button(BUTTON_LB)
-        if lb_pressed and not self.lb_pressed_last:
-            # Button just pressed - toggle mode
-            self.reverse_mode = not self.reverse_mode
-            mode_str = "REVERSE" if self.reverse_mode else "FORWARD"
-            print(f"\n🔄 Mode: {mode_str}")
-        self.lb_pressed_last = lb_pressed
+        def _process_trigger(raw_axis: float) -> float:
+            """
+            Convert trigger axis to usable 0..1 range with deadzone.
+            
+            Xbox triggers report -1.0 when released, +1.0 when fully pressed.
+            We need: released=-1.0 -> 0.0, half=0.0 -> 0.5, full=1.0 -> 1.0
+            """
+            # Map from [-1.0, 1.0] to [0.0, 1.0]
+            normalized = (raw_axis + 1.0) / 2.0
+            
+            # Apply deadzone at the low end
+            if normalized < 0.1:
+                return 0.0
+            
+            # Scale remaining range [0.1, 1.0] to [0.0, 1.0]
+            return (normalized - 0.1) / 0.9
         
-        # Get right trigger for throttle
-        # Trigger ranges from -1.0 (not pressed) to +1.0 (fully pressed)
-        trigger_raw = self.joystick.get_axis(AXIS_RIGHT_TRIGGER)  # Axis 5
+        forward = _process_trigger(self.joystick.get_axis(AXIS_RIGHT_TRIGGER))
+        reverse = _process_trigger(self.joystick.get_axis(AXIS_LEFT_TRIGGER))
         
-        # Convert from -1..1 to 0..1 range
-        trigger = max(0.0, (trigger_raw + 1.0) / 2.0)
+        # Right trigger drives forward (positive throttle), left trigger drives reverse (negative throttle)
+        throttle_raw = forward - reverse
         
-        # Apply threshold - only register trigger press above 15%
-        trigger = 0.0 if trigger < 0.15 else (trigger - 0.15) / 0.85
+        # Get steering from left stick X (positive = clockwise turn)
+        steer_raw = self.joystick.get_axis(AXIS_LEFT_X)
         
-        # Apply mode: reverse_mode False = forward (negative), True = reverse (positive)
-        throttle_raw = -trigger if not self.reverse_mode else trigger
-        
-        # Get steering from left stick X (inverted and reduced sensitivity)
-        steer_raw = -self.joystick.get_axis(AXIS_LEFT_X) * 0.6  # Axis 0, inverted, 60% sensitivity
-        
-        # Apply deadzones
+        # Apply deadzones first
         throttle = apply_deadzone(throttle_raw, 0.05)
         steer = apply_deadzone(steer_raw)
+        
+        # Apply exponential curves for smoother control (per driver experience report)
+        throttle = apply_expo(throttle, THROTTLE_EXPO)
+        steer = apply_expo(steer, STEERING_EXPO)
+        
+        # Apply sensitivity scaling
+        throttle = throttle * THROTTLE_SENSITIVITY
+        steer = steer * STEERING_SENSITIVITY
         
         # Clamp values
         throttle = clamp(throttle)
@@ -586,12 +845,11 @@ class ControllerApp:
         print("\n" + "="*60)
         print("🎮 CONTROLLER ACTIVE")
         print("="*60)
-        print("Left Bumper (LB): Toggle Forward/Reverse mode")
-        print("Right Trigger: Throttle (0-100%)")
-        print("Left Stick X: Steering")
+        print("Right Trigger: Forward throttle")
+        print("Left Trigger: Reverse throttle")
+        print("Left Stick X: Steering (right = clockwise)")
         print("START button: Exit")
         print("="*60)
-        print("📍 Current Mode: FORWARD")
         print("="*60 + "\n")
         
         # Main control loop
@@ -677,36 +935,23 @@ def main():
     print("🤖 Pico-Go LAN Robot - Xbox Controller")
     print("="*60)
     
-    # Check if IP/hostname provided as argument
+    robot_ip = None
+    
+    # Check if IP provided as command-line argument
     if len(sys.argv) > 1:
-        # Manual mode: connect to specified robot
+        # Manual mode: use specified IP/hostname
         robot_address = sys.argv[1]
-        print(f"\n📍 Manual mode: Connecting to {robot_address}")
+        print(f"\n📍 Manual mode: {robot_address}")
         robot_ip = resolve_robot_address(robot_address)
         if robot_ip:
             save_cached_robot(robot_ip)
     else:
-        # Auto-connect mode: Try cache first, then prompt
-        print("\n🔎 Auto-connect mode: Checking for robot...")
-        
-        # Try cached robot first
-        cached_ip = load_cached_robot()
-        if cached_ip:
-            print(f"   📦 Found cached robot: {cached_ip}")
-            print(f"   Testing connection...")
-            if test_robot_connection(cached_ip):
-                print(f"   ✅ Robot reachable!")
-                robot_ip = cached_ip
-            else:
-                print(f"   ⚠️ Cached robot not reachable")
-                robot_ip = prompt_for_robot_ip()
-        else:
-            print(f"   No cached robot found")
-            robot_ip = prompt_for_robot_ip()
-        
-        if robot_ip is None:
-            print("\n❌ No robot selected. Exiting.")
-            sys.exit(0)
+        # Auto mode: Always run discovery (don't blindly trust cache)
+        robot_ip = discover_and_select_robot()
+    
+    if robot_ip is None:
+        print("\n❌ No robot selected. Exiting.\n")
+        sys.exit(0)
     
     print(f"\n{'='*60}")
     print(f"🎯 Target Robot: {robot_ip}:{ROBOT_PORT}")
