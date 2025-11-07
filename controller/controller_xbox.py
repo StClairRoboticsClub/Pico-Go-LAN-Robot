@@ -51,17 +51,44 @@ RECONNECT_DELAY = 1.0
 THROTTLE_EXPO = 2.0  # 1.0=linear, 2.0=quadratic, 3.0=cubic (smoother at low inputs)
 STEERING_EXPO = 1.5  # Less aggressive expo for steering (more precision)
 THROTTLE_SENSITIVITY = 1.0  # Overall throttle multiplier (0.0 to 1.0)
-STEERING_SENSITIVITY = 0.6  # Overall steering multiplier (0.0 to 1.0)
+STEERING_SENSITIVITY = 0.4  # Overall steering multiplier (reduced from 0.6 for less twitchy steering)
+SPEED_STEERING_REDUCTION = 0.5  # Reduce steering at high speed: 0.0=no reduction, 1.0=max reduction
+                                  # At full throttle, steering *= (1.0 - SPEED_STEERING_REDUCTION)
+STEERING_TRIM = 0.0  # Steering offset to compensate for drift (-0.2 to +0.2)
+                     # Negative = compensate for left drift, Positive = compensate for right drift
+                     # Start at 0.0 and adjust in small increments (0.02-0.05)
 
-# Xbox controller axis mappings (SDL2)
-AXIS_LEFT_X = 0  # Left stick horizontal
-AXIS_LEFT_Y = 1  # Left stick vertical
-AXIS_RIGHT_X = 2  # Right stick horizontal
-AXIS_RIGHT_Y = 3  # Right stick vertical
-AXIS_LEFT_TRIGGER = 4
+# ============================================================================
+# Xbox Controller Mappings (SDL2 / pygame)
+# ============================================================================
+# Verified on: Generic X-Box pad (2025-11-07)
+# 
+# AXIS MAPPINGS:
+# Axis 0: Left Stick X     (-1.0 = left,     +1.0 = right)
+# Axis 1: Left Stick Y     (-1.0 = up,       +1.0 = down)
+# Axis 2: Left Trigger     (-1.0 = released, +1.0 = fully pressed)
+# Axis 3: Right Stick X    (-1.0 = right,    +1.0 = left)  ⚠️ INVERTED
+# Axis 4: Right Stick Y    (-1.0 = up,       +1.0 = down)
+# Axis 5: Right Trigger    (-1.0 = released, +1.0 = fully pressed)
+#
+# BUTTON MAPPINGS:
+# Button 0: A
+# Button 1: B
+# Button 2: X
+# Button 3: Y
+# Button 4: LB (Left Bumper)
+# Button 5: RB (Right Bumper)
+# Button 6: BACK
+# Button 7: START
+# ============================================================================
+
+AXIS_LEFT_X = 0
+AXIS_LEFT_Y = 1
+AXIS_LEFT_TRIGGER = 2
+AXIS_RIGHT_X = 3
+AXIS_RIGHT_Y = 4
 AXIS_RIGHT_TRIGGER = 5
 
-# Button mappings
 BUTTON_A = 0
 BUTTON_B = 1
 BUTTON_X = 2
@@ -614,19 +641,27 @@ class XboxController:
         print(f"   Axes: {self.joystick.get_numaxes()}")
         print(f"   Buttons: {self.joystick.get_numbuttons()}")
     
-    def get_throttle_steer(self) -> tuple[float, float]:
+    def get_axes(self, steering_trim: float = 0.0) -> tuple[float, float]:
         """
-        Get throttle and steering values from controller.
+        Get processed throttle and steering values from controller.
         
         Uses:
-        - Right trigger (axis 5): Forward throttle (0 to 1)
-        - Left trigger (axis 4): Reverse throttle (0 to 1)
-        - Left stick X (axis 0): Steering (-1 to 1, right = clockwise)
+        - Right trigger (axis 5): Forward throttle
+        - Left trigger (axis 2): Reverse throttle
+        - Left stick X (axis 0): Steering (negative = CCW, positive = CW)
         
-        Trigger behavior:
-        - Released: axis = -1.0 -> output = 0.0 (no motion)
-        - Half pressed: axis = 0.0 -> output = 0.5
-        - Fully pressed: axis = 1.0 -> output = 1.0
+        Xbox Trigger Hardware Behavior (SDL2):
+        - Released (not pressed): raw axis = -1.0
+        - Half pressed: raw axis = 0.0
+        - Fully pressed: raw axis = +1.0
+        
+        After processing (_process_trigger):
+        - Released: output = 0.0 (no motion)
+        - Half pressed: output ~= 0.44 (with 10% deadzone scaling)
+        - Fully pressed: output = 1.0
+        
+        Args:
+            steering_trim: Calibration offset for steering (-0.2 to +0.2)
         
         Returns:
             (throttle, steer) tuple, each in range -1.0 to 1.0
@@ -641,8 +676,13 @@ class XboxController:
             """
             Convert trigger axis to usable 0..1 range with deadzone.
             
-            Xbox triggers report -1.0 when released, +1.0 when fully pressed.
-            We need: released=-1.0 -> 0.0, half=0.0 -> 0.5, full=1.0 -> 1.0
+            SDL2 reports Xbox triggers as:
+              -1.0 (released) -> 0.0 (fully pressed not reached) -> +1.0 (fully pressed)
+            
+            This function:
+            1. Maps [-1.0, +1.0] to [0.0, 1.0]
+            2. Applies 10% deadzone to filter noise when released
+            3. Rescales [0.1, 1.0] to [0.0, 1.0] for full output range
             """
             # Map from [-1.0, 1.0] to [0.0, 1.0]
             normalized = (raw_axis + 1.0) / 2.0
@@ -674,6 +714,17 @@ class XboxController:
         # Apply sensitivity scaling
         throttle = throttle * THROTTLE_SENSITIVITY
         steer = steer * STEERING_SENSITIVITY
+        
+        # Speed-dependent steering reduction (makes high-speed driving more stable)
+        # At full throttle, reduce steering authority to prevent twitchy control
+        throttle_magnitude = abs(throttle)
+        steering_reduction_factor = 1.0 - (throttle_magnitude * SPEED_STEERING_REDUCTION)
+        steer = steer * steering_reduction_factor
+        
+        # Apply steering trim to compensate for hardware drift
+        # Only apply trim when there's throttle (not when stationary)
+        if abs(throttle) > 0.05:
+            steer = steer + steering_trim
         
         # Clamp values
         throttle = clamp(throttle)
@@ -724,10 +775,17 @@ class RobotConnection:
         self.sock = None
         self.connected = False
         self.seq_num = 0
+        
+        # Robot calibration (fetched on connect)
+        self.calibration = {
+            "steering_trim": STEERING_TRIM,
+            "motor_left_scale": 1.0,
+            "motor_right_scale": 1.0
+        }
     
     async def connect(self) -> bool:
         """
-        Initialize UDP socket (no connection needed).
+        Initialize UDP socket and fetch robot calibration.
         
         Returns:
             True if initialized successfully, False otherwise
@@ -739,6 +797,10 @@ class RobotConnection:
             
             # Create UDP socket
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.settimeout(2.0)  # 2 second timeout for calibration fetch
+            
+            # Request calibration from robot
+            await self._fetch_calibration()
             
             # No connection needed for UDP - just send!
             self.connected = True
@@ -749,6 +811,42 @@ class RobotConnection:
             print(f"❌ Socket initialization failed: {e}")
             self.connected = False
             return False
+    
+    async def _fetch_calibration(self):
+        """Fetch calibration from robot."""
+        try:
+            print("📥 Requesting calibration from robot...")
+            
+            packet = {
+                "cmd": "get_calibration",
+                "seq": self.seq_num,
+                "ts": int(time.time() * 1000)
+            }
+            
+            message = json.dumps(packet).encode()
+            self.sock.sendto(message, (self.robot_ip, self.robot_port))
+            self.seq_num += 1
+            
+            # Wait for response
+            try:
+                data, _ = self.sock.recvfrom(4096)
+                response = json.loads(data.decode())
+                
+                if "calibration" in response:
+                    self.calibration = response["calibration"]
+                    print(f"✅ Calibration loaded:")
+                    print(f"   Robot ID: {self.calibration.get('robot_id', 'unknown')}")
+                    print(f"   Steering Trim: {self.calibration.get('steering_trim', 0.0):+.3f}")
+                    print(f"   Motor Balance: L={self.calibration.get('motor_left_scale', 1.0):.2f} "
+                          f"R={self.calibration.get('motor_right_scale', 1.0):.2f}")
+                else:
+                    print("⚠️  No calibration in response (using defaults)")
+            
+            except socket.timeout:
+                print("⚠️  Calibration request timed out (using defaults)")
+        
+        except Exception as e:
+            print(f"⚠️  Could not fetch calibration: {e} (using defaults)")
     
     async def send_drive_command(self, throttle: float, steer: float) -> bool:
         """
@@ -867,8 +965,11 @@ class ControllerApp:
                 elapsed = now - last_update
                 
                 if elapsed >= self.control_rate:
-                    # Get controller input
-                    throttle, steer = self.controller.get_throttle_steer()
+                    # Get calibration values
+                    steering_trim = self.connection.calibration.get('steering_trim', 0.0)
+                    
+                    # Get controller input (with calibration applied)
+                    throttle, steer = self.controller.get_axes(steering_trim=steering_trim)
                     
                     # Send command
                     if await self.connection.send_drive_command(throttle, steer):

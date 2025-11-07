@@ -80,6 +80,10 @@ class DifferentialDrive:
         self.left_motor = Motor(PIN_MOTOR_A_PWM, PIN_MOTOR_A_IN1, PIN_MOTOR_A_IN2, "Left")
         self.right_motor = Motor(PIN_MOTOR_B_PWM, PIN_MOTOR_B_IN1, PIN_MOTOR_B_IN2, "Right")
         
+        # Motor balance calibration (1.0 = full power, <1.0 = reduced power)
+        self.left_motor_scale = 1.0
+        self.right_motor_scale = 1.0
+        
         self.enabled = False  # Start disabled for safety
         self.stop()  # Ensure motors are stopped
         debug_print("Differential drive initialized (Waveshare) - motors DISABLED")
@@ -136,11 +140,27 @@ class DifferentialDrive:
         left_speed = clamp(left_speed, -1.0, 1.0)
         right_speed = clamp(right_speed, -1.0, 1.0)
         
+        # Apply motor balance calibration
+        left_speed = left_speed * self.left_motor_scale
+        right_speed = right_speed * self.right_motor_scale
+        
         if abs(left_speed) > 0.1 or abs(right_speed) > 0.1:
             debug_print(f"MOTOR: L={left_speed:.2f} R={right_speed:.2f}")
         
         self.left_motor.set_speed(left_speed)
         self.right_motor.set_speed(right_speed)
+    
+    def set_motor_balance(self, left_scale: float, right_scale: float):
+        """
+        Set motor power balance to compensate for motor strength differences.
+        
+        Args:
+            left_scale: Left motor multiplier (0.5 to 1.0)
+            right_scale: Right motor multiplier (0.5 to 1.0)
+        """
+        self.left_motor_scale = clamp(left_scale, 0.5, 1.0)
+        self.right_motor_scale = clamp(right_scale, 0.5, 1.0)
+        debug_print(f"Motor balance set: L={self.left_motor_scale:.2f} R={self.right_motor_scale:.2f}", force=True)
     
     def stop(self):
         self.left_motor.stop()

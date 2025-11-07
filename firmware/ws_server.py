@@ -22,7 +22,7 @@ class WebSocketServer:
     WebSocket server for robot control.
     """
     
-    def __init__(self, motor_controller, safety_controller, lcd_display):
+    def __init__(self, motor_controller, safety_controller, lcd_display, calibration_manager=None):
         """
         Initialize WebSocket server.
         
@@ -30,10 +30,12 @@ class WebSocketServer:
             motor_controller: Motor controller instance
             safety_controller: Safety controller instance
             lcd_display: LCD display instance
+            calibration_manager: Calibration manager instance (optional)
         """
         self.motor_controller = motor_controller
         self.safety_controller = safety_controller
         self.lcd_display = lcd_display
+        self.calibration_manager = calibration_manager
         self.server = None
         self.client = None
         self.running = False
@@ -133,6 +135,10 @@ class WebSocketServer:
                 await self._handle_stop_command(packet)
             elif cmd == "ping":
                 await self._handle_ping_command(packet)
+            elif cmd == "get_calibration":
+                await self._handle_get_calibration(packet)
+            elif cmd == "set_calibration":
+                await self._handle_set_calibration(packet)
             else:
                 debug_print(f"Unknown command: {cmd}")
             
@@ -223,6 +229,53 @@ class WebSocketServer:
         # Just send acknowledgment
         self.safety_controller.feed_watchdog()
     
+    async def _handle_get_calibration(self, packet):
+        """
+        Handle get_calibration command - send current calibration to controller.
+        
+        Args:
+            packet: get_calibration command packet
+        """
+        debug_print("Get calibration request received")
+        
+        if not self.calibration_manager:
+            debug_print("⚠️  No calibration manager available")
+            return
+        
+        # Calibration will be sent in acknowledgment
+        self.safety_controller.feed_watchdog()
+    
+    async def _handle_set_calibration(self, packet):
+        """
+        Handle set_calibration command - update and save calibration.
+        
+        Args:
+            packet: set_calibration command packet with 'calibration' dict
+        """
+        debug_print("Set calibration request received")
+        
+        if not self.calibration_manager:
+            debug_print("⚠️  No calibration manager available")
+            return
+        
+        calibration_updates = packet.get("calibration", {})
+        
+        if self.calibration_manager.update(calibration_updates):
+            if self.calibration_manager.save():
+                debug_print("✅ Calibration updated and saved", force=True)
+                # Apply motor balance immediately
+                if "motor_left_scale" in calibration_updates or "motor_right_scale" in calibration_updates:
+                    self.motor_controller.set_motor_balance(
+                        self.calibration_manager.get("motor_left_scale", 1.0),
+                        self.calibration_manager.get("motor_right_scale", 1.0)
+                    )
+            else:
+                debug_print("❌ Failed to save calibration", force=True)
+        else:
+            debug_print("❌ Failed to update calibration", force=True)
+        
+        self.safety_controller.feed_watchdog()
+    
     async def _send_ack(self, packet):
         """
         Send acknowledgment to client.
@@ -247,6 +300,11 @@ class WebSocketServer:
                 "motor_enabled": motor_status["enabled"],
                 "packets_received": self.packets_received
             }
+            
+            # Include calibration data if requested
+            cmd = packet.get("cmd")
+            if cmd == "get_calibration" and self.calibration_manager:
+                response["calibration"] = self.calibration_manager.get_all()
             
             # Send response (simplified - actual WebSocket framing needed)
             message = json.dumps(response) + "\n"
@@ -281,7 +339,7 @@ class WebSocketServer:
 
 
 # Simple TCP-based implementation (fallback if uwebsocket not available)
-async def udp_server(motor_controller, safety_controller, lcd_display):
+async def udp_server(motor_controller, safety_controller, lcd_display, calibration_manager=None):
     """
     Ultra-low latency UDP control server.
     
@@ -289,6 +347,7 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
         motor_controller: Motor controller instance
         safety_controller: Safety controller instance
         lcd_display: LCD display instance
+        calibration_manager: Calibration manager instance (optional)
     """
     import socket
     import select
@@ -373,6 +432,36 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
                         # Update LCD (throttled internally)
                         if lcd_display:
                             lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+                    
+                    elif cmd == "get_calibration":
+                        # Send calibration data back to controller
+                        debug_print("Get calibration request received")
+                        if calibration_manager:
+                            response = json.dumps({
+                                "seq_ack": seq,
+                                "calibration": calibration_manager.get_all()
+                            }) + "\n"
+                            sock.sendto(response.encode(), addr)
+                            debug_print("Calibration sent", force=True)
+                        safety_controller.feed_watchdog()
+                    
+                    elif cmd == "set_calibration":
+                        # Update and save calibration
+                        debug_print("Set calibration request received")
+                        if calibration_manager:
+                            cal_updates = packet.get("calibration", {})
+                            if calibration_manager.update(cal_updates):
+                                if calibration_manager.save():
+                                    debug_print("✅ Calibration saved", force=True)
+                                    # Apply motor balance immediately
+                                    if "motor_left_scale" in cal_updates or "motor_right_scale" in cal_updates:
+                                        motor_controller.set_motor_balance(
+                                            calibration_manager.get("motor_left_scale", 1.0),
+                                            calibration_manager.get("motor_right_scale", 1.0)
+                                        )
+                                else:
+                                    debug_print("❌ Failed to save calibration", force=True)
+                        safety_controller.feed_watchdog()
                     
                 except Exception as e:
                     debug_print(f"Packet processing error: {e}", force=True)
@@ -480,7 +569,7 @@ async def handle_tcp_client(reader, writer, motor_controller, safety_controller,
 ws_server = None
 
 
-def initialize(motor_controller, safety_controller, lcd_display):
+def initialize(motor_controller, safety_controller, lcd_display, calibration_manager=None):
     """
     Initialize the global WebSocket server.
     
@@ -488,12 +577,13 @@ def initialize(motor_controller, safety_controller, lcd_display):
         motor_controller: Motor controller instance
         safety_controller: Safety controller instance
         lcd_display: LCD display instance
+        calibration_manager: Calibration manager instance (optional)
     
     Returns:
         WebSocketServer instance
     """
     global ws_server
-    ws_server = WebSocketServer(motor_controller, safety_controller, lcd_display)
+    ws_server = WebSocketServer(motor_controller, safety_controller, lcd_display, calibration_manager)
     return ws_server
 
 
