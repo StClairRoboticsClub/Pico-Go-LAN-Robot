@@ -108,8 +108,12 @@ class UnderglowController:
             debug_print(f"Underglow set_color error: {e}")
     
     def update_flash(self):
-        """Update flashing animation based on time."""
+        """Update flashing animation based on time. Only flashes for non-driving states."""
         if not self.enabled or not self.sm:
+            return
+        
+        # Don't flash during DRIVING - it should stay solid
+        if self.current_state == STATE_DRIVING:
             return
         
         current_time = time.ticks_ms()
