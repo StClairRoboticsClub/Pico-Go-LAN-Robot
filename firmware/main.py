@@ -19,7 +19,6 @@ import motor
 import lcd_status
 import watchdog as wd
 import ws_server
-import calibration
 
 
 class RobotController:
@@ -34,7 +33,6 @@ class RobotController:
         self.lcd_display = None
         self.safety_controller = None
         self.ws_server = None
-        self.calibration_manager = None
         self.running = False
         
         debug_print("=== Pico-Go LAN Robot ===", force=True)
@@ -64,19 +62,6 @@ class RobotController:
             if not self.wifi_manager or not self.wifi_manager.is_connected():
                 raise Exception("Failed to connect to Wi-Fi")
             
-            # Get robot ID from config or use default
-            robot_id = "picogo1"  # TODO: Move to config file
-            
-            # 4.5. Initialize calibration manager
-            debug_print("Initializing calibration...")
-            self.calibration_manager = calibration.initialize(robot_id)
-            
-            # Apply motor balance from calibration
-            self.motor_controller.set_motor_balance(
-                self.calibration_manager.get("motor_left_scale", 1.0),
-                self.calibration_manager.get("motor_right_scale", 1.0)
-            )
-            
             # Update LCD with network info
             if self.lcd_display:
                 wifi_status = self.wifi_manager.get_status()
@@ -86,13 +71,12 @@ class RobotController:
                     rssi=wifi_status["rssi"]
                 )
             
-            # 5. Initialize WebSocket server with calibration
+            # 5. Initialize WebSocket server
             debug_print("Initializing WebSocket server...")
             self.ws_server = ws_server.initialize(
                 self.motor_controller,
                 self.safety_controller,
-                self.lcd_display,
-                self.calibration_manager
+                self.lcd_display
             )
             
             # 6. Mark startup complete and arm safety systems
@@ -155,8 +139,7 @@ class RobotController:
         await ws_server.udp_server(
             self.motor_controller,
             self.safety_controller,
-            self.lcd_display,
-            self.calibration_manager
+            self.lcd_display
         )
     
     async def _status_update_task(self):

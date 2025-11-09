@@ -52,11 +52,6 @@ THROTTLE_EXPO = 2.0  # 1.0=linear, 2.0=quadratic, 3.0=cubic (smoother at low inp
 STEERING_EXPO = 1.5  # Less aggressive expo for steering (more precision)
 THROTTLE_SENSITIVITY = 1.0  # Overall throttle multiplier (0.0 to 1.0)
 STEERING_SENSITIVITY = 0.4  # Overall steering multiplier (reduced from 0.6 for less twitchy steering)
-SPEED_STEERING_REDUCTION = 0.5  # Reduce steering at high speed: 0.0=no reduction, 1.0=max reduction
-                                  # At full throttle, steering *= (1.0 - SPEED_STEERING_REDUCTION)
-STEERING_TRIM = 0.0  # Steering offset to compensate for drift (-0.2 to +0.2)
-                     # Negative = compensate for left drift, Positive = compensate for right drift
-                     # Start at 0.0 and adjust in small increments (0.02-0.05)
 
 # ============================================================================
 # Xbox Controller Mappings (SDL2 / pygame)
@@ -606,8 +601,166 @@ def apply_expo(value: float, expo: float = 2.0) -> float:
 
 
 # ============================================================================
-# CONTROLLER INPUT HANDLER
+# CONTROLLER INPUT HANDLERS
 # ============================================================================
+
+class KeyboardController:
+    """
+    Keyboard input handler as fallback when no Xbox controller is available.
+    Creates a small pygame window to capture keyboard events.
+    """
+    
+    def __init__(self):
+        """Initialize keyboard controller with pygame window."""
+        pygame.init()
+        
+        # Create a small window to capture keyboard events
+        self.screen = pygame.display.set_mode((400, 300))
+        pygame.display.set_caption("🤖 Robot Keyboard Controller")
+        
+        # Set up font for displaying controls
+        pygame.font.init()
+        self.font = pygame.font.Font(None, 24)
+        self.small_font = pygame.font.Font(None, 18)
+        
+        self.connected = True
+        
+        # Current state
+        self.throttle = 0.0
+        self.steer = 0.0
+        
+        # Control parameters
+        self.throttle_step = 0.05  # Throttle change per frame
+        self.steer_step = 0.05     # Steering change per frame
+        self.throttle_decay = 0.95  # Throttle decay when no input
+        self.steer_decay = 0.90     # Steering decay when no input
+        
+        print("⌨️  Keyboard controller initialized")
+        print("   A pygame window will open - keep it focused!")
+        print("   W/S: Throttle forward/reverse")
+        print("   A/D: Steer left/right")
+        print("   Space: Brake (stop)")
+        print("   ESC: Exit")
+    
+    def _draw_ui(self):
+        """Draw control UI in the pygame window."""
+        # Clear screen
+        self.screen.fill((20, 20, 30))
+        
+        # Title
+        title = self.font.render("Robot Keyboard Controller", True, (255, 255, 255))
+        self.screen.blit(title, (50, 20))
+        
+        # Controls
+        y = 70
+        controls = [
+            "W - Forward",
+            "S - Reverse",
+            "A - Steer Left",
+            "D - Steer Right",
+            "SPACE - Brake",
+            "ESC - Exit"
+        ]
+        for control in controls:
+            text = self.small_font.render(control, True, (200, 200, 200))
+            self.screen.blit(text, (50, y))
+            y += 25
+        
+        # Current values
+        y += 20
+        throttle_text = self.font.render(f"Throttle: {self.throttle:+.2f}", True, (100, 255, 100))
+        steer_text = self.font.render(f"Steering: {self.steer:+.2f}", True, (100, 200, 255))
+        self.screen.blit(throttle_text, (50, y))
+        self.screen.blit(steer_text, (50, y + 30))
+        
+        pygame.display.flip()
+    
+    def get_axes(self, steering_trim: float = 0.0) -> tuple[float, float]:
+        """
+        Get processed throttle and steering values from keyboard.
+        
+        Args:
+            steering_trim: Calibration offset for steering (-0.2 to +0.2)
+        
+        Returns:
+            (throttle, steer) tuple, each in range -1.0 to 1.0
+        """
+        if not self.connected:
+            return 0.0, 0.0
+        
+        # Process pygame events (required for window to stay responsive)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.connected = False
+                return 0.0, 0.0
+        
+        # Get current keyboard state
+        keys = pygame.key.get_pressed()
+        
+        # Throttle control (W/S keys)
+        if keys[pygame.K_w]:
+            self.throttle = min(1.0, self.throttle + self.throttle_step)
+        elif keys[pygame.K_s]:
+            self.throttle = max(-1.0, self.throttle - self.throttle_step)
+        elif keys[pygame.K_SPACE]:
+            # Brake - rapid stop
+            self.throttle *= 0.5
+        else:
+            # Decay throttle toward zero when no input
+            self.throttle *= self.throttle_decay
+            if abs(self.throttle) < 0.01:
+                self.throttle = 0.0
+        
+        # Steering control (A/D keys)
+        if keys[pygame.K_d]:
+            self.steer = min(1.0, self.steer + self.steer_step)
+        elif keys[pygame.K_a]:
+            self.steer = max(-1.0, self.steer - self.steer_step)
+        else:
+            # Decay steering toward zero when no input
+            self.steer *= self.steer_decay
+            if abs(self.steer) < 0.01:
+                self.steer = 0.0
+        
+        # Update UI
+        self._draw_ui()
+        
+        # Apply steering trim when there's throttle
+        steer_output = self.steer
+        if abs(self.throttle) > 0.05:
+            steer_output = steer_output + steering_trim
+        
+        # Clamp values
+        throttle_output = clamp(self.throttle)
+        steer_output = clamp(steer_output)
+        
+        return throttle_output, steer_output
+    
+    def get_button(self, button_id: int) -> bool:
+        """
+        Check if ESC is pressed (exit button).
+        
+        Args:
+            button_id: Ignored for keyboard (always checks ESC)
+        
+        Returns:
+            True if ESC pressed, False otherwise
+        """
+        if not self.connected:
+            return False
+        
+        # Process events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return True
+        
+        keys = pygame.key.get_pressed()
+        return keys[pygame.K_ESCAPE]
+    
+    def is_connected(self) -> bool:
+        """Check if keyboard is available."""
+        return self.connected
+
 
 class XboxController:
     """
@@ -628,8 +781,7 @@ class XboxController:
         joystick_count = pygame.joystick.get_count()
         
         if joystick_count == 0:
-            print("⚠️  No controller detected!")
-            print("   Please connect an Xbox controller and restart.")
+            print("⚠️  No Xbox controller detected")
             return
         
         # Use first controller
@@ -637,11 +789,11 @@ class XboxController:
         self.joystick.init()
         self.connected = True
         
-        print(f"✅ Controller connected: {self.joystick.get_name()}")
+        print(f"✅ Xbox controller connected: {self.joystick.get_name()}")
         print(f"   Axes: {self.joystick.get_numaxes()}")
         print(f"   Buttons: {self.joystick.get_numbuttons()}")
     
-    def get_axes(self, steering_trim: float = 0.0) -> tuple[float, float]:
+    def get_axes(self) -> tuple[float, float]:
         """
         Get processed throttle and steering values from controller.
         
@@ -659,9 +811,6 @@ class XboxController:
         - Released: output = 0.0 (no motion)
         - Half pressed: output ~= 0.44 (with 10% deadzone scaling)
         - Fully pressed: output = 1.0
-        
-        Args:
-            steering_trim: Calibration offset for steering (-0.2 to +0.2)
         
         Returns:
             (throttle, steer) tuple, each in range -1.0 to 1.0
@@ -715,17 +864,6 @@ class XboxController:
         throttle = throttle * THROTTLE_SENSITIVITY
         steer = steer * STEERING_SENSITIVITY
         
-        # Speed-dependent steering reduction (makes high-speed driving more stable)
-        # At full throttle, reduce steering authority to prevent twitchy control
-        throttle_magnitude = abs(throttle)
-        steering_reduction_factor = 1.0 - (throttle_magnitude * SPEED_STEERING_REDUCTION)
-        steer = steer * steering_reduction_factor
-        
-        # Apply steering trim to compensate for hardware drift
-        # Only apply trim when there's throttle (not when stationary)
-        if abs(throttle) > 0.05:
-            steer = steer + steering_trim
-        
         # Clamp values
         throttle = clamp(throttle)
         steer = clamp(steer)
@@ -775,17 +913,10 @@ class RobotConnection:
         self.sock = None
         self.connected = False
         self.seq_num = 0
-        
-        # Robot calibration (fetched on connect)
-        self.calibration = {
-            "steering_trim": STEERING_TRIM,
-            "motor_left_scale": 1.0,
-            "motor_right_scale": 1.0
-        }
     
     async def connect(self) -> bool:
         """
-        Initialize UDP socket and fetch robot calibration.
+        Initialize UDP socket (no connection needed).
         
         Returns:
             True if initialized successfully, False otherwise
@@ -797,10 +928,6 @@ class RobotConnection:
             
             # Create UDP socket
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.settimeout(2.0)  # 2 second timeout for calibration fetch
-            
-            # Request calibration from robot
-            await self._fetch_calibration()
             
             # No connection needed for UDP - just send!
             self.connected = True
@@ -811,42 +938,6 @@ class RobotConnection:
             print(f"❌ Socket initialization failed: {e}")
             self.connected = False
             return False
-    
-    async def _fetch_calibration(self):
-        """Fetch calibration from robot."""
-        try:
-            print("📥 Requesting calibration from robot...")
-            
-            packet = {
-                "cmd": "get_calibration",
-                "seq": self.seq_num,
-                "ts": int(time.time() * 1000)
-            }
-            
-            message = json.dumps(packet).encode()
-            self.sock.sendto(message, (self.robot_ip, self.robot_port))
-            self.seq_num += 1
-            
-            # Wait for response
-            try:
-                data, _ = self.sock.recvfrom(4096)
-                response = json.loads(data.decode())
-                
-                if "calibration" in response:
-                    self.calibration = response["calibration"]
-                    print(f"✅ Calibration loaded:")
-                    print(f"   Robot ID: {self.calibration.get('robot_id', 'unknown')}")
-                    print(f"   Steering Trim: {self.calibration.get('steering_trim', 0.0):+.3f}")
-                    print(f"   Motor Balance: L={self.calibration.get('motor_left_scale', 1.0):.2f} "
-                          f"R={self.calibration.get('motor_right_scale', 1.0):.2f}")
-                else:
-                    print("⚠️  No calibration in response (using defaults)")
-            
-            except socket.timeout:
-                print("⚠️  Calibration request timed out (using defaults)")
-        
-        except Exception as e:
-            print(f"⚠️  Could not fetch calibration: {e} (using defaults)")
     
     async def send_drive_command(self, throttle: float, steer: float) -> bool:
         """
@@ -913,7 +1004,16 @@ class ControllerApp:
             robot_ip: Robot IP address
         """
         self.robot_ip = robot_ip
+        
+        # Try Xbox controller first, fall back to keyboard
         self.controller = XboxController()
+        self.controller_type = "Xbox"
+        
+        if not self.controller.is_connected():
+            print("🔄 Falling back to keyboard controls...")
+            self.controller = KeyboardController()
+            self.controller_type = "Keyboard"
+        
         self.connection = RobotConnection(robot_ip, ROBOT_PORT)
         self.running = False
         self.control_rate = 1.0 / CONTROL_RATE_HZ
@@ -926,12 +1026,8 @@ class ControllerApp:
         """Run the controller application."""
         self.running = True
         
-        # Check if controller is connected
-        if not self.controller.is_connected():
-            print("❌ No controller found. Exiting.")
-            return
-        
-        # Connect to robot
+        # Controller is guaranteed to be connected (either Xbox or Keyboard)
+                # Connect to robot
         while self.running and not self.connection.connected:
             if not await self.connection.connect():
                 print(f"⏳ Retrying in {RECONNECT_DELAY}s...")
@@ -941,12 +1037,21 @@ class ControllerApp:
             return
         
         print("\n" + "="*60)
-        print("🎮 CONTROLLER ACTIVE")
-        print("="*60)
-        print("Right Trigger: Forward throttle")
-        print("Left Trigger: Reverse throttle")
-        print("Left Stick X: Steering (right = clockwise)")
-        print("START button: Exit")
+        if self.controller_type == "Xbox":
+            print("🎮 XBOX CONTROLLER ACTIVE")
+            print("="*60)
+            print("Right Trigger: Forward throttle")
+            print("Left Trigger: Reverse throttle")
+            print("Left Stick X: Steering (right = clockwise)")
+            print("START button: Exit")
+        else:
+            print("⌨️  KEYBOARD CONTROLLER ACTIVE")
+            print("="*60)
+            print("Keep the pygame window focused!")
+            print("W/S: Throttle forward/reverse")
+            print("A/D: Steer left/right")
+            print("Space: Brake (quick stop)")
+            print("ESC: Exit")
         print("="*60)
         print("="*60 + "\n")
         
@@ -965,11 +1070,8 @@ class ControllerApp:
                 elapsed = now - last_update
                 
                 if elapsed >= self.control_rate:
-                    # Get calibration values
-                    steering_trim = self.connection.calibration.get('steering_trim', 0.0)
-                    
-                    # Get controller input (with calibration applied)
-                    throttle, steer = self.controller.get_axes(steering_trim=steering_trim)
+                    # Get controller input
+                    throttle, steer = self.controller.get_axes()
                     
                     # Send command
                     if await self.connection.send_drive_command(throttle, steer):
