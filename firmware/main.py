@@ -20,6 +20,7 @@ import lcd_status
 import watchdog as wd
 import ws_server
 import underglow
+import charging_mode
 
 
 class RobotController:
@@ -35,6 +36,7 @@ class RobotController:
         self.safety_controller = None
         self.ws_server = None
         self.underglow = None
+        self.charging_mode = None
         self.running = False
         
         debug_print("=== Pico-Go LAN Robot ===", force=True)
@@ -43,6 +45,10 @@ class RobotController:
     async def initialize(self):
         """Initialize all subsystems in proper order."""
         try:
+            # 0. Initialize charging mode controller first
+            debug_print("Initializing charging mode...")
+            self.charging_mode = charging_mode.initialize()
+            
             # 1. Initialize LCD first for visual feedback
             debug_print("Initializing LCD...")
             self.lcd_display = lcd_status.initialize()
@@ -122,6 +128,26 @@ class RobotController:
         try:
             # Run main loop
             while self.running:
+                # Check for charging mode button press
+                if self.charging_mode and self.charging_mode.check_button():
+                    debug_print("Charging mode activated!", force=True)
+                    # Enter blocking charging mode
+                    self.charging_mode.enter_charging_mode(
+                        self.motor_controller,
+                        self.wifi_manager,
+                        self.underglow,
+                        self.lcd_display
+                    )
+                    # Monitor loop blocks until button pressed again
+                    self.charging_mode.monitor_loop(
+                        self.motor_controller,
+                        self.wifi_manager,
+                        self.underglow,
+                        self.lcd_display
+                    )
+                    # When it returns, robot will soft reset
+                    # (execution never reaches here)
+                
                 # Check safety systems
                 if not self.safety_controller.check_safety():
                     debug_print("Safety check failed")
