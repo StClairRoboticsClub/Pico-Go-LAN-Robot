@@ -69,6 +69,9 @@ class Watchdog:
             self.timed_out = False
             if self.lcd_display and self.motor_controller:
                 self.lcd_display.set_state(STATE_DRIVING)
+            # Update underglow back to driving state on recovery
+            if self.underglow:
+                self.underglow.set_state(STATE_DRIVING)
     
     def check_timeout(self):
         """

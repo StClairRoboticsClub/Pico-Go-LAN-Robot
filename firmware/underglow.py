@@ -130,13 +130,13 @@ class UnderglowController:
                 if self.flash_state:
                     self.set_color_all(self.robot_color)
                 else:
-                    self.set_color_all((255, 0, 0))  # RED
+                    self.set_color_all((255, 0, 0))  # BRIGHT RED
             elif self.current_state == STATE_CLIENT_OK:
-                # Flash between robot color and ORANGE (controller starting)
+                # Flash between robot color and GREEN (controller starting - very distinct)
                 if self.flash_state:
                     self.set_color_all(self.robot_color)
                 else:
-                    self.set_color_all((255, 165, 0))  # ORANGE (different from robot color)
+                    self.set_color_all((0, 255, 0))  # BRIGHT GREEN
     
     def set_state(self, state):
         """
