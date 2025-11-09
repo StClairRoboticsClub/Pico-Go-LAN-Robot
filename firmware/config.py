@@ -20,20 +20,39 @@ WIFI_RETRY_DELAY_MS = 5000  # 5 seconds between retries
 WEBSOCKET_PORT = 8765
 WEBSOCKET_HOST = "0.0.0.0"  # Listen on all interfaces
 
-# Robot ID Configuration - for multiple robots on same network
-# Change this to a unique number for each robot (1, 2, 3, etc.)
-ROBOT_ID = 1
+# ============================================================================
+# ROBOT PROFILE CONFIGURATION - CHANGE THIS BEFORE FLASHING!
+# ============================================================================
+# Choose a profile number (0-7) to set robot name and color
+# Each robot should have a unique profile for racing identification
+#
+# Profile 0: WHITE   - Clean, bright, high visibility
+# Profile 1: RED     - Bold, aggressive racing style
+# Profile 2: ORANGE  - THUNDER - High energy and power
+# Profile 3: YELLOW  - BLITZ - Fast and striking
+# Profile 4: GREEN   - NITRO - Speed boost energy
+# Profile 5: BLUE    - TURBO - Cool performance
+# Profile 6: INDIGO  - SPEED - Deep racing blue
+# Profile 7: VIOLET  - PULSE - Electric purple energy
 
-# Robot Name - Cool racing names to spark interest!
-# Change for each robot to give them personality
-ROBOT_NAMES = {
-    1: "THUNDER",
-    2: "BLITZ",
-    3: "NITRO",
-    4: "TURBO",
-    5: "SPEED"
+ROBOT_PROFILE = 2  # ← CHANGE THIS NUMBER (0-7) BEFORE FLASHING!
+
+# Robot Profiles - DO NOT EDIT BELOW THIS LINE
+ROBOT_PROFILES = {
+    0: {"name": "WHITE",   "color": (255, 255, 255)},  # White
+    1: {"name": "RED",     "color": (255, 0, 0)},      # Red
+    2: {"name": "THUNDER", "color": (255, 140, 0)},    # Orange (dark orange)
+    3: {"name": "BLITZ",   "color": (255, 255, 0)},    # Yellow
+    4: {"name": "NITRO",   "color": (0, 255, 0)},      # Green
+    5: {"name": "TURBO",   "color": (0, 0, 255)},      # Blue
+    6: {"name": "SPEED",   "color": (75, 0, 130)},     # Indigo
+    7: {"name": "PULSE",   "color": (138, 43, 226)}    # Violet
 }
-ROBOT_NAME = ROBOT_NAMES.get(ROBOT_ID, f"RACER-{ROBOT_ID}")
+
+# Set robot name and color from profile
+ROBOT_ID = ROBOT_PROFILE
+ROBOT_NAME = ROBOT_PROFILES[ROBOT_PROFILE]["name"]
+ROBOT_COLOR = ROBOT_PROFILES[ROBOT_PROFILE]["color"]
 
 # mDNS Configuration - allows connection via hostname instead of IP
 MDNS_HOSTNAME = f"picogo{ROBOT_ID}"  # Robot will be accessible as picogo1.local, picogo2.local, etc.
@@ -104,15 +123,11 @@ UNDERGLOW_NUM_LEDS = 4  # Number of LEDs on Waveshare Pico-Go v2
 UNDERGLOW_ENABLED = True  # Enable/disable underglow
 UNDERGLOW_BRIGHTNESS = 255  # Full brightness (0-255) - always 100%
 
-# Robot colors (RGB) - unique color per robot ID for identification
-ROBOT_COLORS = {
-    1: (255, 140, 0),    # THUNDER - Dark Orange (yellow-orange)
-    2: (0, 191, 255),    # BLITZ - Deep Sky Blue
-    3: (255, 69, 0),     # NITRO - Orange Red
-    4: (50, 205, 50),    # TURBO - Lime Green
-    5: (138, 43, 226)    # SPEED - Blue Violet
-}
-ROBOT_COLOR = ROBOT_COLORS.get(ROBOT_ID, (255, 255, 255))  # Default to white
+# WiFi Configuration
+WIFI_SSID = "YOUR_HOTSPOT_SSID"
+WIFI_PASSWORD = "YOUR_HOTSPOT_PASSWORD"
+WIFI_COUNTRY = "US"
+WIFI_TIMEOUT_SEC = 15
 
 # ============================================================================
 # POWER & ELECTRICAL
