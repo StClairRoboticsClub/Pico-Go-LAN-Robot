@@ -153,9 +153,9 @@ class UnderglowController:
             self.flash_state = False
             
             if state == STATE_DRIVING:
-                # Solid robot color when driving
-                self.set_color_all(self.robot_color)
-                debug_print(f"Underglow: DRIVING - solid {self.robot_color}")
+                # Solid YELLOW when driving (highly visible)
+                self.set_color_all((255, 255, 0))  # YELLOW
+                debug_print(f"Underglow: DRIVING - solid YELLOW")
             elif state in [STATE_LINK_LOST, STATE_BOOT]:
                 # Start flashing robot color / RED
                 self.set_color_all(self.robot_color)
