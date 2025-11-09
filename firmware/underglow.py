@@ -10,9 +10,11 @@ License: MIT
 
 Features:
 - Unique color per robot ID for easy identification
-- Dim brightness when disconnected (always-on indicator)
-- Bright brightness when connected to controller
-- Smooth brightness transitions
+- 100% brightness always
+- Flashing animations based on connection state:
+  - Disconnected: Flash between robot color and RED
+  - Connected: Flash between robot color and YELLOW
+  - Driving: Solid robot color
 """
 
 from machine import Pin
@@ -21,14 +23,13 @@ import time
 import rp2
 from config import (
     PIN_UNDERGLOW, UNDERGLOW_NUM_LEDS, UNDERGLOW_ENABLED,
-    UNDERGLOW_BRIGHTNESS_DIM, UNDERGLOW_BRIGHTNESS_BRIGHT,
-    ROBOT_COLOR, ROBOT_ID,
+    UNDERGLOW_BRIGHTNESS, ROBOT_COLOR, ROBOT_ID,
     STATE_BOOT, STATE_NET_UP, STATE_CLIENT_OK, STATE_DRIVING, STATE_LINK_LOST
 )
 from utils import debug_print
 
 
-# PIO program for WS2812 (from Waveshare demo)
+# PIO program for WS2812 (from Waveshare Pico-Go documentation)
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT, autopull=True, pull_thresh=24)
 def ws2812():
     T1 = 2
@@ -45,104 +46,92 @@ def ws2812():
 
 
 class UnderglowController:
-    """Control WS2812B underglow LEDs with brightness management using PIO."""
+    """Control WS2812B underglow LEDs with flashing animations."""
     
     def __init__(self):
         """Initialize underglow controller."""
         self.enabled = UNDERGLOW_ENABLED
         self.pin = PIN_UNDERGLOW
         self.num = UNDERGLOW_NUM_LEDS
-        self.brightness = UNDERGLOW_BRIGHTNESS_DIM / 255.0  # Normalize to 0.0-1.0
         self.sm = None
         self.ar = None
-        self.base_color = ROBOT_COLOR  # RGB tuple (0-255, 0-255, 0-255)
+        self.robot_color = ROBOT_COLOR  # RGB tuple (0-255, 0-255, 0-255)
+        self.current_state = None
+        self.flash_state = False
+        self.last_flash_time = 0
+        self.flash_interval_ms = 500  # Flash every 500ms
         
         if not self.enabled:
             debug_print("Underglow disabled in config", force=True)
             return
         
         try:
-            # Initialize PIO state machine for WS2812 (exactly like Waveshare)
+            # Initialize PIO state machine for WS2812 (Waveshare Pico-Go v2)
             self.sm = rp2.StateMachine(0, ws2812, freq=8_000_000, sideset_base=Pin(self.pin))
             self.sm.active(1)
             
             # Create LED array
             self.ar = array.array("I", [0 for _ in range(self.num)])
             
-            # Set initial dim state
-            self.set_brightness(UNDERGLOW_BRIGHTNESS_DIM)
-            self.pixels_show()
+            # Set initial state - solid robot color
+            self.set_color_all(self.robot_color)
             
             debug_print(f"Underglow initialized: {self.num} LEDs on GP{self.pin}", force=True)
-            debug_print(f"Robot ID {ROBOT_ID} color: RGB{self.base_color}", force=True)
+            debug_print(f"Robot ID {ROBOT_ID} color: RGB{self.robot_color}", force=True)
             
         except Exception as e:
             debug_print(f"Underglow initialization error: {e}", force=True)
             self.enabled = False
     
-    def set_brightness(self, brightness):
+    def set_color_all(self, color):
         """
-        Set target brightness level (0-255).
+        Set all LEDs to the same color at full brightness.
         
         Args:
-            brightness: Target brightness (0-255)
+            color: RGB tuple (0-255, 0-255, 0-255)
         """
-        if not self.enabled or not self.sm:
-            return
-        
-        # Normalize to 0.0-1.0 range (like Waveshare)
-        self.brightness = max(0.0, min(1.0, brightness / 255.0))
-    
-    def set_color(self, r, g, b):
-        """
-        Set base color (overrides robot ID color).
-        
-        Args:
-            r, g, b: RGB values (0-255)
-        """
-        if not self.enabled or not self.sm:
-            return
-        
-        self.base_color = (r, g, b)
-    
-    def pixels_set(self, i, color):
-        """Set a single LED color (Waveshare compatible)."""
-        # Store as (G<<16) + (R<<8) + B like Waveshare
-        self.ar[i] = (color[1] << 16) + (color[0] << 8) + color[2]
-    
-    def pixels_fill(self, color):
-        """Fill all LEDs with the same color (Waveshare compatible)."""
-        for i in range(self.num):
-            self.pixels_set(i, color)
-    
-    def pixels_show(self):
-        """Update the LEDs with brightness applied (exactly like Waveshare)."""
         if not self.enabled or not self.sm:
             return
         
         try:
-            # Apply brightness scaling (Waveshare method)
-            dimmer_ar = array.array("I", [0 for _ in range(self.num)])
-            for i, c in enumerate(self.ar):
-                r = int(((c >> 8) & 0xFF) * self.brightness)
-                g = int(((c >> 16) & 0xFF) * self.brightness)
-                b = int((c & 0xFF) * self.brightness)
-                dimmer_ar[i] = (g << 16) + (r << 8) + b
+            r, g, b = color
+            # WS2812 expects GRB format
+            grb_value = (g << 16) | (r << 8) | b
             
-            # Send to PIO state machine
-            self.sm.put(dimmer_ar, 8)
+            for i in range(self.num):
+                self.ar[i] = grb_value
+            
+            # Send to LEDs
+            self.sm.put(self.ar, 8)
             
         except Exception as e:
-            debug_print(f"Underglow update error: {e}")
+            debug_print(f"Underglow set_color error: {e}")
     
-    def update(self):
-        """Update LED colors with robot's base color."""
+    def update_flash(self):
+        """Update flashing animation based on time."""
         if not self.enabled or not self.sm:
             return
         
-        # Fill all LEDs with robot color
-        self.pixels_fill(self.base_color)
-        self.pixels_show()
+        current_time = time.ticks_ms()
+        
+        # Check if it's time to toggle flash state
+        if time.ticks_diff(current_time, self.last_flash_time) >= self.flash_interval_ms:
+            self.flash_state = not self.flash_state
+            self.last_flash_time = current_time
+            
+            # Update color based on state
+            if self.current_state in [STATE_LINK_LOST, STATE_BOOT]:
+                # Flash between robot color and RED
+                if self.flash_state:
+                    self.set_color_all(self.robot_color)
+                else:
+                    self.set_color_all((255, 0, 0))  # RED
+            elif self.current_state in [STATE_NET_UP, STATE_CLIENT_OK]:
+                # Flash between robot color and YELLOW
+                if self.flash_state:
+                    self.set_color_all(self.robot_color)
+                else:
+                    self.set_color_all((255, 255, 0))  # YELLOW
     
     def set_state(self, state):
         """
@@ -155,62 +144,25 @@ class UnderglowController:
             return
         
         try:
-            # Determine brightness based on state
-            if state in [STATE_CLIENT_OK, STATE_DRIVING]:
-                # Connected - bright
-                new_brightness = UNDERGLOW_BRIGHTNESS_BRIGHT
-            elif state == STATE_BOOT:
-                # Booting - very dim
-                new_brightness = UNDERGLOW_BRIGHTNESS_DIM // 2
-            else:
-                # Disconnected/waiting - dim
-                new_brightness = UNDERGLOW_BRIGHTNESS_DIM
+            self.current_state = state
+            self.last_flash_time = time.ticks_ms()
+            self.flash_state = False
             
-            # Update brightness if changed
-            new_brightness_normalized = new_brightness / 255.0
-            if abs(new_brightness_normalized - self.brightness) > 0.01:
-                self.set_brightness(new_brightness)
-                self.update()
-                debug_print(f"Underglow brightness: {new_brightness} (state: {state})")
+            if state == STATE_DRIVING:
+                # Solid robot color when driving
+                self.set_color_all(self.robot_color)
+                debug_print(f"Underglow: DRIVING - solid {self.robot_color}")
+            elif state in [STATE_LINK_LOST, STATE_BOOT]:
+                # Start flashing robot color / RED
+                self.set_color_all(self.robot_color)
+                debug_print(f"Underglow: {state} - flash robot/RED")
+            elif state in [STATE_NET_UP, STATE_CLIENT_OK]:
+                # Start flashing robot color / YELLOW  
+                self.set_color_all(self.robot_color)
+                debug_print(f"Underglow: {state} - flash robot/YELLOW")
         
         except Exception as e:
             debug_print(f"Underglow state update error: {e}")
-    
-    def pulse(self, duration_ms=1000):
-        """
-        Pulse effect - fade from dim to bright and back.
-        Useful for boot/connection events.
-        
-        Args:
-            duration_ms: Total pulse duration in milliseconds
-        """
-        if not self.enabled or not self.sm:
-            return
-        
-        try:
-            steps = 20
-            step_delay = duration_ms // (steps * 2)
-            
-            # Fade up
-            for i in range(steps):
-                brightness = UNDERGLOW_BRIGHTNESS_DIM + (
-                    (UNDERGLOW_BRIGHTNESS_BRIGHT - UNDERGLOW_BRIGHTNESS_DIM) * i // steps
-                )
-                self.set_brightness(brightness)
-                self.update()
-                time.sleep_ms(step_delay)
-            
-            # Fade down
-            for i in range(steps):
-                brightness = UNDERGLOW_BRIGHTNESS_BRIGHT - (
-                    (UNDERGLOW_BRIGHTNESS_BRIGHT - UNDERGLOW_BRIGHTNESS_DIM) * i // steps
-                )
-                self.set_brightness(brightness)
-                self.update()
-                time.sleep_ms(step_delay)
-        
-        except Exception as e:
-            debug_print(f"Underglow pulse error: {e}")
     
     def off(self):
         """Turn off all LEDs."""
@@ -218,9 +170,7 @@ class UnderglowController:
             return
         
         try:
-            # Set all LEDs to black (off) using Waveshare method
-            self.pixels_fill((0, 0, 0))
-            self.pixels_show()
+            self.set_color_all((0, 0, 0))
         except Exception as e:
             debug_print(f"Underglow off error: {e}")
 

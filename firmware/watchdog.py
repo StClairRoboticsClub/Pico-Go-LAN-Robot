@@ -22,16 +22,18 @@ class Watchdog:
     within the timeout period.
     """
     
-    def __init__(self, motor_controller, lcd_display):
+    def __init__(self, motor_controller, lcd_display, underglow=None):
         """
         Initialize watchdog.
         
         Args:
             motor_controller: Motor controller instance to stop on timeout
             lcd_display: LCD display instance to show warnings
+            underglow: Underglow LED controller instance (optional)
         """
         self.motor_controller = motor_controller
         self.lcd_display = lcd_display
+        self.underglow = underglow
         self.last_packet_time = 0
         self.timeout_ms = WATCHDOG_TIMEOUT_MS
         self.enabled = False
@@ -99,6 +101,10 @@ class Watchdog:
         # Update display
         if self.lcd_display:
             self.lcd_display.set_state(STATE_LINK_LOST)
+        
+        # Dim underglow
+        if self.underglow:
+            self.underglow.set_state(STATE_LINK_LOST)
     
     def get_status(self):
         """
@@ -145,17 +151,19 @@ class SafetyController:
     Higher-level safety controller with multiple safety mechanisms.
     """
     
-    def __init__(self, motor_controller, lcd_display):
+    def __init__(self, motor_controller, lcd_display, underglow=None):
         """
         Initialize safety controller.
         
         Args:
             motor_controller: Motor controller instance
             lcd_display: LCD display instance
+            underglow: Underglow LED controller instance (optional)
         """
         self.motor_controller = motor_controller
         self.lcd_display = lcd_display
-        self.watchdog = Watchdog(motor_controller, lcd_display)
+        self.underglow = underglow
+        self.watchdog = Watchdog(motor_controller, lcd_display, underglow)
         self.e_stop_active = False
         self.startup_complete = False
         
@@ -241,19 +249,20 @@ class SafetyController:
 safety_controller = None
 
 
-def initialize(motor_controller, lcd_display):
+def initialize(motor_controller, lcd_display, underglow=None):
     """
     Initialize the global safety controller.
     
     Args:
         motor_controller: Motor controller instance
         lcd_display: LCD display instance
+        underglow: Underglow LED controller instance (optional)
     
     Returns:
         SafetyController instance
     """
     global safety_controller
-    safety_controller = SafetyController(motor_controller, lcd_display)
+    safety_controller = SafetyController(motor_controller, lcd_display, underglow)
     return safety_controller
 
 

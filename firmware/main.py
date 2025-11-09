@@ -19,6 +19,7 @@ import motor
 import lcd_status
 import watchdog as wd
 import ws_server
+import underglow
 
 
 class RobotController:
@@ -33,6 +34,7 @@ class RobotController:
         self.lcd_display = None
         self.safety_controller = None
         self.ws_server = None
+        self.underglow = None
         self.running = False
         
         debug_print("=== Pico-Go LAN Robot ===", force=True)
@@ -47,15 +49,21 @@ class RobotController:
             if self.lcd_display:
                 self.lcd_display.set_state(STATE_BOOT)
             
-            # 2. Initialize motor controller
+            # 2. Initialize underglow LEDs
+            debug_print("Initializing underglow...")
+            self.underglow = underglow.initialize()
+            if self.underglow:
+                self.underglow.set_state(STATE_BOOT)
+            
+            # 3. Initialize motor controller
             debug_print("Initializing motor controller...")
             self.motor_controller = motor.initialize()
             
-            # 3. Initialize safety controller
+            # 4. Initialize safety controller
             debug_print("Initializing safety controller...")
-            self.safety_controller = wd.initialize(self.motor_controller, self.lcd_display)
+            self.safety_controller = wd.initialize(self.motor_controller, self.lcd_display, self.underglow)
             
-            # 4. Connect to Wi-Fi
+            # 5. Connect to Wi-Fi
             debug_print("Connecting to Wi-Fi...", force=True)
             self.wifi_manager = await wifi.initialize()
             
@@ -71,15 +79,20 @@ class RobotController:
                     rssi=wifi_status["rssi"]
                 )
             
-            # 5. Initialize WebSocket server
+            # Update underglow for network connected
+            if self.underglow:
+                self.underglow.set_state("NET_UP")
+            
+            # 6. Initialize WebSocket server
             debug_print("Initializing WebSocket server...")
             self.ws_server = ws_server.initialize(
                 self.motor_controller,
                 self.safety_controller,
-                self.lcd_display
+                self.lcd_display,
+                self.underglow
             )
             
-            # 6. Mark startup complete and arm safety systems
+            # 7. Mark startup complete and arm safety systems
             self.safety_controller.startup_complete_ok()
             
             debug_print("=== Initialization Complete ===", force=True)
@@ -102,7 +115,8 @@ class RobotController:
         tasks = [
             asyncio.create_task(self._watchdog_task()),
             asyncio.create_task(self._server_task()),
-            asyncio.create_task(self._status_update_task())
+            asyncio.create_task(self._status_update_task()),
+            asyncio.create_task(self._underglow_flash_task())
         ]
         
         try:
@@ -139,7 +153,8 @@ class RobotController:
         await ws_server.udp_server(
             self.motor_controller,
             self.safety_controller,
-            self.lcd_display
+            self.lcd_display,
+            self.underglow
         )
     
     async def _status_update_task(self):
@@ -154,6 +169,14 @@ class RobotController:
             
             # Status check every 1 second
             await asyncio.sleep(1)
+    
+    async def _underglow_flash_task(self):
+        """Background task to update underglow flashing animations."""
+        while self.running:
+            if self.underglow:
+                self.underglow.update_flash()
+            # Update flash every 50ms for smooth animation
+            await asyncio.sleep_ms(50)
     
     async def shutdown(self):
         """Gracefully shutdown all subsystems."""

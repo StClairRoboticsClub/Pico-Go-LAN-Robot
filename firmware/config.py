@@ -24,6 +24,17 @@ WEBSOCKET_HOST = "0.0.0.0"  # Listen on all interfaces
 # Change this to a unique number for each robot (1, 2, 3, etc.)
 ROBOT_ID = 1
 
+# Robot Name - Cool racing names to spark interest!
+# Change for each robot to give them personality
+ROBOT_NAMES = {
+    1: "THUNDER",
+    2: "BLITZ",
+    3: "NITRO",
+    4: "TURBO",
+    5: "SPEED"
+}
+ROBOT_NAME = ROBOT_NAMES.get(ROBOT_ID, f"RACER-{ROBOT_ID}")
+
 # mDNS Configuration - allows connection via hostname instead of IP
 MDNS_HOSTNAME = f"picogo{ROBOT_ID}"  # Robot will be accessible as picogo1.local, picogo2.local, etc.
 MDNS_ENABLED = True
@@ -32,7 +43,7 @@ MDNS_ENABLED = True
 # SAFETY & TIMING
 # ============================================================================
 
-WATCHDOG_TIMEOUT_MS = 200  # Stop motors if no packet for 200ms
+WATCHDOG_TIMEOUT_MS = 500  # Stop motors if no packet for 500ms (increased from 200ms)
 CONTROL_RATE_HZ = 30  # Expected control packet rate
 MAIN_LOOP_MS = 50  # Main loop update rate
 
@@ -83,6 +94,25 @@ LCD_ROTATION = 0  # 0, 90, 180, or 270 degrees
 # Ultrasonic Sensor (HC-SR04)
 PIN_ULTRASONIC_TRIG = 10
 PIN_ULTRASONIC_ECHO = 11
+
+# ============================================================================
+# UNDERGLOW LEDs (WS2812B)
+# ============================================================================
+
+PIN_UNDERGLOW = 6  # GPIO pin for WS2812B data line (Waveshare Pico-Go v2)
+UNDERGLOW_NUM_LEDS = 4  # Number of LEDs on Waveshare Pico-Go v2
+UNDERGLOW_ENABLED = True  # Enable/disable underglow
+UNDERGLOW_BRIGHTNESS = 255  # Full brightness (0-255) - always 100%
+
+# Robot colors (RGB) - unique color per robot ID for identification
+ROBOT_COLORS = {
+    1: (255, 140, 0),    # THUNDER - Dark Orange (yellow-orange)
+    2: (0, 191, 255),    # BLITZ - Deep Sky Blue
+    3: (255, 69, 0),     # NITRO - Orange Red
+    4: (50, 205, 50),    # TURBO - Lime Green
+    5: (138, 43, 226)    # SPEED - Blue Violet
+}
+ROBOT_COLOR = ROBOT_COLORS.get(ROBOT_ID, (255, 255, 255))  # Default to white
 
 # ============================================================================
 # POWER & ELECTRICAL

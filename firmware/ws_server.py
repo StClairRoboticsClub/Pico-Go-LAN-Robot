@@ -22,7 +22,7 @@ class WebSocketServer:
     WebSocket server for robot control.
     """
     
-    def __init__(self, motor_controller, safety_controller, lcd_display):
+    def __init__(self, motor_controller, safety_controller, lcd_display, underglow=None):
         """
         Initialize WebSocket server.
         
@@ -30,10 +30,12 @@ class WebSocketServer:
             motor_controller: Motor controller instance
             safety_controller: Safety controller instance
             lcd_display: LCD display instance
+            underglow: Underglow LED controller instance (optional)
         """
         self.motor_controller = motor_controller
         self.safety_controller = safety_controller
         self.lcd_display = lcd_display
+        self.underglow = underglow
         self.server = None
         self.client = None
         self.running = False
@@ -281,14 +283,15 @@ class WebSocketServer:
 
 
 # Simple TCP-based implementation (fallback if uwebsocket not available)
-async def udp_server(motor_controller, safety_controller, lcd_display):
+async def udp_server(motor_controller, safety_controller, lcd_display, underglow=None):
     """
-    Ultra-low latency UDP control server.
+    Optimized UDP server for low-latency control (fire-and-forget protocol).
     
     Args:
         motor_controller: Motor controller instance
-        safety_controller: Safety controller instance
+        safety_controller: Safety controller instance  
         lcd_display: LCD display instance
+        underglow: Underglow LED controller instance (optional)
     """
     import socket
     import select
@@ -322,6 +325,8 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
                     client_connected = True
                     if lcd_display:
                         lcd_display.set_state(STATE_CLIENT_OK)
+                    if underglow:
+                        underglow.set_state(STATE_CLIENT_OK)
                 
                 try:
                     packet = json.loads(data.decode().strip())
@@ -373,6 +378,10 @@ async def udp_server(motor_controller, safety_controller, lcd_display):
                         # Update LCD (throttled internally)
                         if lcd_display:
                             lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+                        
+                        # Update underglow on first drive command only (avoid overhead)
+                        if underglow and not motor_controller.enabled:
+                            underglow.set_state(STATE_DRIVING)
                     
                 except Exception as e:
                     debug_print(f"Packet processing error: {e}", force=True)
@@ -480,7 +489,7 @@ async def handle_tcp_client(reader, writer, motor_controller, safety_controller,
 ws_server = None
 
 
-def initialize(motor_controller, safety_controller, lcd_display):
+def initialize(motor_controller, safety_controller, lcd_display, underglow=None):
     """
     Initialize the global WebSocket server.
     
@@ -488,12 +497,13 @@ def initialize(motor_controller, safety_controller, lcd_display):
         motor_controller: Motor controller instance
         safety_controller: Safety controller instance
         lcd_display: LCD display instance
+        underglow: Underglow LED controller instance (optional)
     
     Returns:
         WebSocketServer instance
     """
     global ws_server
-    ws_server = WebSocketServer(motor_controller, safety_controller, lcd_display)
+    ws_server = WebSocketServer(motor_controller, safety_controller, lcd_display, underglow)
     return ws_server
 
 
