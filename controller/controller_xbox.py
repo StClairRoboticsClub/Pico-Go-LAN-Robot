@@ -1115,6 +1115,22 @@ class ControllerApp:
         # Main control loop
         last_update = time.time()
         charging_mode_active = False
+
+        # --- Button arming: require all relevant buttons to be released before accepting input ---
+        start_armed = False
+        back_armed = False
+        while not (start_armed and back_armed):
+            pygame.event.pump()
+            start_pressed = self.controller.get_button(BUTTON_START)
+            back_pressed = self.controller.get_button(BUTTON_BACK)
+            if not start_pressed:
+                start_armed = True
+            if not back_pressed:
+                back_armed = True
+            if start_armed and back_armed:
+                break
+            await asyncio.sleep(0.01)
+        # --- End arming ---
         
         try:
             while self.running:
