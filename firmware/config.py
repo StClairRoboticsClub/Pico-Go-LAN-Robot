@@ -99,7 +99,7 @@ PIN_ULTRASONIC_ECHO = 11
 # UNDERGLOW LEDs (WS2812B)
 # ============================================================================
 
-PIN_UNDERGLOW = 6  # GPIO pin for WS2812B data line (Waveshare Pico-Go v2)
+PIN_UNDERGLOW = 22  # GPIO pin for WS2812B data line (Waveshare Pico-Go v2 - per official demo)
 UNDERGLOW_NUM_LEDS = 4  # Number of LEDs on Waveshare Pico-Go v2
 UNDERGLOW_ENABLED = True  # Enable/disable underglow
 UNDERGLOW_BRIGHTNESS = 255  # Full brightness (0-255) - always 100%
