@@ -17,7 +17,7 @@ set -e  # Exit on error
 # Configuration
 SSID="PicoLAN"
 PASSWORD="pico1234"
-INTERFACE="wlp112s0"  # Change if your Wi-Fi interface is different
+INTERFACE="wlp8s0"  # WiFi interface (was wlp112s0)
 BAND="bg"          # 2.4 GHz (bg) or 5 GHz (a)
 CHANNEL=""         # Leave empty for auto
 

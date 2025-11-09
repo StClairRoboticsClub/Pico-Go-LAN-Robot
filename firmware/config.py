@@ -35,7 +35,7 @@ WEBSOCKET_HOST = "0.0.0.0"  # Listen on all interfaces
 # Profile 6: INDIGO  - SPEED - Deep racing blue
 # Profile 7: VIOLET  - PULSE - Electric purple energy
 
-ROBOT_PROFILE = 2  # ← CHANGE THIS NUMBER (0-7) BEFORE FLASHING!
+ROBOT_PROFILE = 0  # ← CHANGE THIS NUMBER (0-7) BEFORE FLASHING!
 
 # Robot Profiles - DO NOT EDIT BELOW THIS LINE
 ROBOT_PROFILES = {
