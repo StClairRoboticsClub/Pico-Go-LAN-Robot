@@ -379,8 +379,8 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                         if lcd_display:
                             lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
                         
-                        # Update underglow on first drive command only (avoid overhead)
-                        if underglow and not motor_controller.enabled:
+                        # Update underglow to DRIVING state (track if first drive command)
+                        if underglow and packets_received == 1:
                             underglow.set_state(STATE_DRIVING)
                     
                 except Exception as e:
