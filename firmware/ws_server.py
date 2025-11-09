@@ -16,6 +16,9 @@ import uasyncio as asyncio
 from config import WEBSOCKET_PORT, WEBSOCKET_HOST, STATE_CLIENT_OK, STATE_DRIVING, STATE_LINK_LOST
 from utils import debug_print
 
+# Global flag for charging mode request from controller
+charging_mode_requested = None  # None = no request, True = enable, False = disable
+
 
 class WebSocketServer:
     """
@@ -382,6 +385,16 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                         # Update underglow to DRIVING state (track if first drive command)
                         if underglow and packets_received == 1:
                             underglow.set_state(STATE_DRIVING)
+                    
+                    elif cmd == "charging":
+                        # Handle charging mode command from controller
+                        enable = packet.get("enable", False)
+                        debug_print(f"Charging mode {'ENABLED' if enable else 'DISABLED'}", force=True)
+                        
+                        # Trigger charging mode state change in main loop
+                        # We'll use a global flag that main.py can check
+                        global charging_mode_requested
+                        charging_mode_requested = enable
                     
                 except Exception as e:
                     debug_print(f"Packet processing error: {e}", force=True)

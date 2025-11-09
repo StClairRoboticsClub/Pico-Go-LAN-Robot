@@ -79,22 +79,24 @@ python3 controller/controller_xbox.py 10.42.0.123
 ```
 
 **Controls:**
-- **Left Stick Y-axis**: Forward/Reverse throttle
+- **Right Trigger**: Forward throttle
+- **Left Trigger**: Reverse throttle
 - **Left Stick X-axis**: Steering
-- **START button**: Exit controller app
+- **BACK + START**: Toggle charging mode (power saving)
+- **START (alone)**: Exit controller app
 
 ### 5. Charging Mode (Power Saving)
 
-The robot has a special charging mode to save power when not in use:
+The robot has a special low-power charging mode that can be activated remotely from the controller:
 
 **To Enter Charging Mode:**
-1. Make sure robot is powered on
-2. Press the **BOOTSEL button** on the back of the robot
+1. Make sure robot and controller are connected
+2. Press **BACK + START** together on the Xbox controller
 3. LCD will show "CHARGING MODE" screen
 4. All systems suspended (motors, WiFi, LEDs off)
 
 **To Exit Charging Mode:**
-1. Press the **BOOTSEL button** again
+1. Press **BACK + START** again on the controller
 2. Robot will reset and resume normal operation
 
 This is ideal when charging the battery or storing the robot - it prevents unnecessary power drain while keeping the LCD active to show charging status.

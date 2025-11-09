@@ -1,8 +1,8 @@
 """
 Pico-Go LAN Robot - Charging Mode
 ==================================
-Low-power charging mode activated by BOOTSEL button.
-Suspends all operations except button monitoring.
+Low-power charging mode activated remotely via controller.
+Suspends all operations until disabled.
 
 Author: Jeremy Dueck
 Organization: St. Clair College Robotics Club
@@ -21,38 +21,16 @@ class ChargingMode:
     When activated:
     - All subsystems are disabled (motors, WiFi, LEDs)
     - Only LCD shows "CHARGING" status
-    - BOOTSEL button monitored to resume operation
+    - Controller command required to resume operation
     """
     
     def __init__(self):
         """Initialize charging mode controller."""
-        # BOOTSEL button on Pico is GPIO23 (internal)
-        # On Pico-Go, the back button is wired to BOOTSEL
-        self.button = machine.Pin(23, machine.Pin.IN, machine.Pin.PULL_UP)
         self.charging = False
-        self.last_button_time = 0
-        self.debounce_ms = 200  # 200ms debounce
     
-    def check_button(self):
-        """
-        Check if BOOTSEL button is pressed.
-        Returns True if button pressed (with debounce).
-        
-        Note: BOOTSEL is active LOW (0 = pressed)
-        """
-        current_time = time.ticks_ms()
-        
-        # Check if enough time has passed since last button press
-        if time.ticks_diff(current_time, self.last_button_time) < self.debounce_ms:
-            return False
-        
-        # Button is pressed when LOW (0)
-        if self.button.value() == 0:
-            self.last_button_time = current_time
-            debug_print("BOOTSEL button pressed", force=True)
-            return True
-        
-        return False
+    def is_charging(self):
+        """Check if currently in charging mode."""
+        return self.charging
     
     def enter_charging_mode(self, motor_controller, wifi_manager, underglow, lcd_display):
         """
@@ -150,17 +128,21 @@ class ChargingMode:
     
     def monitor_loop(self, motor_controller, wifi_manager, underglow, lcd_display):
         """
-        Blocking loop that monitors BOOTSEL button during charging.
-        Returns when button is pressed to exit charging mode.
+        Blocking loop that monitors charging mode status.
+        Returns when controller sends disable command.
         
         This is a simple blocking loop to minimize power consumption.
         """
         debug_print("Starting charging mode monitor loop...")
         
+        # Import here to avoid circular dependency
+        import ws_server
+        
         while self.charging:
-            # Check button every 100ms
-            if self.check_button():
-                debug_print("Button pressed - exiting charging mode")
+            # Check if controller requested exit
+            if ws_server.charging_mode_requested == False:
+                debug_print("Controller requested exit - disabling charging mode")
+                ws_server.charging_mode_requested = None  # Clear flag
                 self.exit_charging_mode()
                 return
             

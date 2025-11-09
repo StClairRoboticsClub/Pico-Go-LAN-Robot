@@ -128,25 +128,28 @@ class RobotController:
         try:
             # Run main loop
             while self.running:
-                # Check for charging mode button press
-                if self.charging_mode and self.charging_mode.check_button():
-                    debug_print("Charging mode activated!", force=True)
-                    # Enter blocking charging mode
-                    self.charging_mode.enter_charging_mode(
-                        self.motor_controller,
-                        self.wifi_manager,
-                        self.underglow,
-                        self.lcd_display
-                    )
-                    # Monitor loop blocks until button pressed again
-                    self.charging_mode.monitor_loop(
-                        self.motor_controller,
-                        self.wifi_manager,
-                        self.underglow,
-                        self.lcd_display
-                    )
-                    # When it returns, robot will soft reset
-                    # (execution never reaches here)
+                # Check for charging mode request from controller
+                import ws_server
+                if ws_server.charging_mode_requested is not None:
+                    if ws_server.charging_mode_requested:
+                        # Enter charging mode
+                        debug_print("Charging mode activated via controller!", force=True)
+                        self.charging_mode.enter_charging_mode(
+                            self.motor_controller,
+                            self.wifi_manager,
+                            self.underglow,
+                            self.lcd_display
+                        )
+                        # Monitor loop blocks until disabled
+                        self.charging_mode.monitor_loop(
+                            self.motor_controller,
+                            self.wifi_manager,
+                            self.underglow,
+                            self.lcd_display
+                        )
+                        # When it returns, robot will soft reset
+                    # Reset the flag
+                    ws_server.charging_mode_requested = None
                 
                 # Check safety systems
                 if not self.safety_controller.check_safety():
