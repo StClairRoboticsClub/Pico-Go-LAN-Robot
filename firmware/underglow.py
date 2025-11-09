@@ -108,12 +108,13 @@ class UnderglowController:
             debug_print(f"Underglow set_color error: {e}")
     
     def update_flash(self):
-        """Update flashing animation based on time. Only flashes for non-driving states."""
+        """Update flashing animation based on time. Only flashes for disconnected states."""
         if not self.enabled or not self.sm:
             return
         
-        # Don't flash during DRIVING - it should stay solid
-        if self.current_state == STATE_DRIVING:
+        # Only flash for BOOT and LINK_LOST states
+        # CLIENT_OK, NET_UP, and DRIVING should stay solid
+        if self.current_state not in [STATE_BOOT, STATE_LINK_LOST]:
             return
         
         current_time = time.ticks_ms()
@@ -123,19 +124,13 @@ class UnderglowController:
             self.flash_state = not self.flash_state
             self.last_flash_time = current_time
             
-            # Update color based on state
+            # Update color based on state - only flash for disconnected states
             if self.current_state in [STATE_LINK_LOST, STATE_BOOT]:
                 # Flash between robot color and RED
                 if self.flash_state:
                     self.set_color_all(self.robot_color)
                 else:
                     self.set_color_all((255, 0, 0))  # RED
-            elif self.current_state in [STATE_NET_UP, STATE_CLIENT_OK]:
-                # Flash between robot color and YELLOW
-                if self.flash_state:
-                    self.set_color_all(self.robot_color)
-                else:
-                    self.set_color_all((255, 255, 0))  # YELLOW
     
     def set_state(self, state):
         """
@@ -153,17 +148,17 @@ class UnderglowController:
             self.flash_state = False
             
             if state == STATE_DRIVING:
-                # Solid YELLOW when driving (highly visible)
-                self.set_color_all((255, 255, 0))  # YELLOW
-                debug_print(f"Underglow: DRIVING - solid YELLOW")
+                # Solid robot color when driving
+                self.set_color_all(self.robot_color)
+                debug_print(f"Underglow: DRIVING - solid {self.robot_color}")
             elif state in [STATE_LINK_LOST, STATE_BOOT]:
-                # Start flashing robot color / RED
+                # Start flashing robot color / RED (disconnected)
                 self.set_color_all(self.robot_color)
                 debug_print(f"Underglow: {state} - flash robot/RED")
             elif state in [STATE_NET_UP, STATE_CLIENT_OK]:
-                # Start flashing robot color / YELLOW  
+                # Solid robot color when connected
                 self.set_color_all(self.robot_color)
-                debug_print(f"Underglow: {state} - flash robot/YELLOW")
+                debug_print(f"Underglow: {state} - solid {self.robot_color}")
         
         except Exception as e:
             debug_print(f"Underglow state update error: {e}")
