@@ -13,11 +13,11 @@ Install via: mpremote mip install uwebsocket
 
 import json
 import uasyncio as asyncio
+import time
 from config import WEBSOCKET_PORT, WEBSOCKET_HOST, STATE_CLIENT_OK, STATE_DRIVING, STATE_LINK_LOST
 from utils import debug_print
-
-# Global flag for charging mode request from controller
-charging_mode_requested = None  # None = no request, True = enable, False = disable
+from events import get_event_bus, EVENT_CHARGING_MODE_REQUESTED, EVENT_CLIENT_CONNECTED, EVENT_CLIENT_DISCONNECTED
+import calibration
 
 
 class WebSocketServer:
@@ -285,7 +285,207 @@ class WebSocketServer:
         }
 
 
-# Simple TCP-based implementation (fallback if uwebsocket not available)
+# ============================================================================
+# PACKET HANDLING (Consolidated)
+# ============================================================================
+
+def _process_drive_command(packet, motor_controller, safety_controller, lcd_display, underglow=None, packet_count=0, max_age_ms=500):
+    """
+    Process drive command packet (consolidated handler).
+    
+    Args:
+        packet: Parsed JSON packet
+        motor_controller: Motor controller instance
+        safety_controller: Safety controller instance
+        lcd_display: LCD display instance
+        underglow: Underglow LED controller (optional)
+        packet_count: Current packet count for debugging
+        max_age_ms: Maximum age for command timestamp (500ms for UDP, 200ms for TCP)
+    
+    Returns:
+        True if command was processed, False if rejected
+    """
+    # Check timestamp to reject stale commands
+    timestamp = packet.get("ts", 0)
+    
+    if timestamp > 0:
+        current_time = int(time.time() * 1000)
+        age_ms = current_time - timestamp
+        
+        if age_ms > max_age_ms:
+            debug_print(f"Stale command rejected (age: {age_ms}ms)")
+            return False
+        elif age_ms < -1000:  # Clock skew detected
+            debug_print(f"Clock skew detected: {age_ms}ms")
+    
+    axes = packet.get("axes", {})
+    throttle = axes.get("throttle", 0.0)
+    steer = axes.get("steer", 0.0)
+    
+    # DEBUG: Print every 30th packet
+    if packet_count > 0 and packet_count % 30 == 0:
+        debug_print(f"Drive cmd: T={throttle:.2f} S={steer:.2f} PKT={packet_count}")
+    
+    # Feed watchdog FIRST (critical for safety)
+    safety_controller.feed_watchdog()
+    
+    # Enable motors if needed
+    if not motor_controller.enabled:
+        motor_controller.enable()
+        debug_print("Motors enabled", force=True)
+    
+    # Execute drive command
+    motor_controller.drive(throttle, steer)
+    
+    # Update LCD (throttled internally)
+    if lcd_display:
+        lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+    
+    # Update underglow to DRIVING state (track if first drive command)
+    if underglow and packet_count == 1:
+        underglow.set_state(STATE_DRIVING)
+    
+    return True
+
+
+def _process_charging_command(packet):
+    """
+    Process charging mode command packet.
+    
+    Args:
+        packet: Parsed JSON packet
+    """
+    enable = packet.get("enable", False)
+    debug_print(f"Charging mode {'ENABLED' if enable else 'DISABLED'}", force=True)
+    
+    # Publish event instead of using global variable
+    event_bus = get_event_bus()
+    event_bus.publish(EVENT_CHARGING_MODE_REQUESTED, enable)
+
+
+def _process_get_calibration_command(packet, sock, addr):
+    """
+    Process get_calibration command - return current calibration data.
+    
+    Args:
+        packet: Parsed JSON packet
+        sock: UDP socket for response
+        addr: Client address tuple
+    """
+    try:
+        cal = calibration.get_calibration()
+        response = {
+            "type": "calibration_response",
+            "seq_ack": packet.get("seq", 0),
+            "calibration": cal.to_dict()
+        }
+        
+        message = json.dumps(response) + "\n"
+        sock.sendto(message.encode(), addr)
+        debug_print(f"Calibration data sent to {addr}", force=True)
+        
+    except Exception as e:
+        debug_print(f"Error sending calibration: {e}", force=True)
+
+
+def _process_set_calibration_command(packet):
+    """
+    Process set_calibration command - update calibration data.
+    
+    Args:
+        packet: Parsed JSON packet with calibration data
+    """
+    try:
+        cal_data = packet.get("calibration", {})
+        if not cal_data:
+            debug_print("No calibration data in packet", force=True)
+            return False
+        
+        cal = calibration.get_calibration()
+        cal.from_dict(cal_data)
+        
+        debug_print(f"Calibration updated: trim={cal.steering_trim:+.3f}, "
+                   f"L={cal.motor_left_scale:.2f}, R={cal.motor_right_scale:.2f}", force=True)
+        return True
+        
+    except Exception as e:
+        debug_print(f"Error setting calibration: {e}", force=True)
+        return False
+
+
+def _process_set_profile_command(packet, sock, addr):
+    """
+    Process set_profile command - update robot name and color.
+    
+    Note: This updates the config in memory. For permanent changes,
+    the user should update config.py and reflash firmware.
+    
+    Args:
+        packet: Parsed JSON packet with profile data
+        sock: UDP socket for response
+        addr: Client address tuple
+    """
+    try:
+        robot_id = packet.get("robot_id")
+        name = packet.get("name", "")
+        color = packet.get("color", [255, 255, 255])
+        
+        if not name or robot_id is None:
+            response = {
+                "type": "profile_response",
+                "success": False,
+                "message": "Missing robot_id or name"
+            }
+            sock.sendto((json.dumps(response) + "\n").encode(), addr)
+            return
+        
+        # Update config (in-memory only - requires reflash for permanent)
+        from config import ROBOT_ID
+        if robot_id == ROBOT_ID:
+            # Update name and color in config module
+            import config
+            config.ROBOT_NAME = name
+            config.ROBOT_COLOR = tuple(color)
+            
+            debug_print(f"Profile updated: {name} RGB{color}", force=True)
+            
+            # Update underglow if active
+            # (This would require passing underglow instance, so we'll skip for now)
+            
+            response = {
+                "type": "profile_response",
+                "success": True,
+                "message": f"Profile updated: {name} RGB{color}",
+                "robot_id": robot_id,
+                "name": name,
+                "color": color
+            }
+        else:
+            response = {
+                "type": "profile_response",
+                "success": False,
+                "message": f"Robot ID mismatch: expected {ROBOT_ID}, got {robot_id}"
+            }
+        
+        sock.sendto((json.dumps(response) + "\n").encode(), addr)
+        
+    except Exception as e:
+        debug_print(f"Error setting profile: {e}", force=True)
+        response = {
+            "type": "profile_response",
+            "success": False,
+            "message": str(e)
+        }
+        try:
+            sock.sendto((json.dumps(response) + "\n").encode(), addr)
+        except:
+            pass
+
+
+# ============================================================================
+# UDP SERVER (Low Latency)
+# ============================================================================
+
 async def udp_server(motor_controller, safety_controller, lcd_display, underglow=None):
     """
     Optimized UDP server for low-latency control (fire-and-forget protocol).
@@ -345,12 +545,15 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                     if cmd == "discover":
                         # Respond to broadcast discovery requests
                         try:
-                            from config import ROBOT_ID, MDNS_HOSTNAME
+                            from config import ROBOT_ID, MDNS_HOSTNAME, ROBOT_COLOR
+                            cal = calibration.get_calibration()
                             response = json.dumps({
                                 "type": "robot_info",
                                 "robot_id": ROBOT_ID,
                                 "hostname": MDNS_HOSTNAME,
-                                "version": "1.0"
+                                "version": "1.0",
+                                "color": list(ROBOT_COLOR),  # RGB tuple as list
+                                "calibration": cal.to_dict()  # Include calibration data
                             }) + "\n"
                             sock.sendto(response.encode(), addr)
                             debug_print(f"Discovery response sent to {addr}", force=True)
@@ -358,43 +561,24 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                             debug_print(f"Discovery response error: {e}", force=True)
                         continue
                     
+                    elif cmd == "get_calibration":
+                        _process_get_calibration_command(packet, sock, addr)
+                        continue
+                    
+                    elif cmd == "set_calibration":
+                        _process_set_calibration_command(packet)
+                        continue
+                    
+                    elif cmd == "set_profile":
+                        _process_set_profile_command(packet, sock, addr)
+                        continue
+                    
                     elif cmd == "drive":
-                        axes = packet.get("axes", {})
-                        throttle = axes.get("throttle", 0.0)
-                        steer = axes.get("steer", 0.0)
-                        
-                        # DEBUG: Print every 30th packet
-                        if packets_received % 30 == 0:
-                            debug_print(f"Drive cmd: T={throttle:.2f} S={steer:.2f} PKT={packets_received}")
-                        
-                        # Feed watchdog FIRST (critical for safety)
-                        safety_controller.feed_watchdog()
-                        
-                        # Enable motors if needed
-                        if not motor_controller.enabled:
-                            motor_controller.enable()
-                            debug_print("Motors enabled", force=True)
-                        
-                        # Execute drive command
-                        motor_controller.drive(throttle, steer)
-                        
-                        # Update LCD (throttled internally)
-                        if lcd_display:
-                            lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
-                        
-                        # Update underglow to DRIVING state (track if first drive command)
-                        if underglow and packets_received == 1:
-                            underglow.set_state(STATE_DRIVING)
+                        if _process_drive_command(packet, motor_controller, safety_controller, lcd_display, underglow, packets_received):
+                            packets_received += 1
                     
                     elif cmd == "charging":
-                        # Handle charging mode command from controller
-                        enable = packet.get("enable", False)
-                        debug_print(f"Charging mode {'ENABLED' if enable else 'DISABLED'}", force=True)
-                        
-                        # Trigger charging mode state change in main loop
-                        # We'll use a global flag that main.py can check
-                        global charging_mode_requested
-                        charging_mode_requested = enable
+                        _process_charging_command(packet)
                     
                 except Exception as e:
                     debug_print(f"Packet processing error: {e}", force=True)
@@ -446,33 +630,12 @@ async def handle_tcp_client(reader, writer, motor_controller, safety_controller,
                 
                 cmd = packet.get("cmd")
                 if cmd == "drive":
-                    # Check timestamp to reject stale commands (max age: 200ms)
-                    timestamp = packet.get("ts", 0)
-                    if timestamp > 0:
-                        import time
-                        current_time = int(time.time() * 1000)  # Current time in milliseconds
-                        age_ms = current_time - timestamp
-                        
-                        if age_ms > 200:  # Reject commands older than 200ms
-                            debug_print(f"Stale command rejected (age: {age_ms}ms)")
-                            continue  # Skip this command, don't feed watchdog
-                        elif age_ms < -1000:  # Clock skew detected
-                            debug_print(f"Clock skew detected: {age_ms}ms")
-                            # Continue anyway, but warn
-                    
-                    axes = packet.get("axes", {})
-                    throttle = axes.get("throttle", 0.0)
-                    steer = axes.get("steer", 0.0)
-                    
-                    safety_controller.feed_watchdog()
-                    
-                    if not motor_controller.enabled:
-                        motor_controller.enable()
-                    
-                    motor_controller.drive(throttle, steer)
-                    
-                    if lcd_display:
-                        lcd_display.set_state(STATE_DRIVING, throttle=throttle, steer=steer)
+                    # Use consolidated handler (with 200ms max age for TCP)
+                    if not _process_drive_command(packet, motor_controller, safety_controller, lcd_display, None, 0, max_age_ms=200):
+                        continue  # Skip stale command, don't feed watchdog
+                
+                elif cmd == "charging":
+                    _process_charging_command(packet)
                 
                 # No ACK needed - fire and forget for maximum performance
                 # Removing ACK reduces latency significantly

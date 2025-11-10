@@ -170,6 +170,23 @@ For detailed troubleshooting, see **[docs/GUIDE.md](docs/GUIDE.md)**.
 - **[CALIBRATION.md](docs/CALIBRATION.md)** - Motor calibration procedures
 - **[RACING_LCD_DISPLAYS.md](docs/RACING_LCD_DISPLAYS.md)** - LCD design documentation
 
+## 🤖 Multi-Agent Development System
+
+This project uses a structured multi-agent coordination system for organized development:
+
+- **[AGENT_ROLES.md](AGENT_ROLES.md)** - Complete agent role definitions and responsibilities
+- **[agents.yaml](agents.yaml)** - Machine-readable agent configuration and task routing
+- **[DIRECTOR_WORKFLOW.md](DIRECTOR_WORKFLOW.md)** - Director coordination procedures
+- **[TASK_ROUTING.md](TASK_ROUTING.md)** - Task classification and routing guide
+- **[QUALITY_METRICS.md](QUALITY_METRICS.md)** - Quality standards and performance benchmarks
+- **[agent_prompts/](agent_prompts/)** - Agent system prompt templates
+
+The system includes:
+- **Director Agent**: Main coordinator for task management and integration
+- **Firmware & Hardware Agent**: Owns `/firmware` and `/schematics`
+- **Controller & Network Agent**: Owns `/controller`
+- **Documentation & Performance Agent**: Owns `/docs`
+
 ---
 
 ## 📜 License

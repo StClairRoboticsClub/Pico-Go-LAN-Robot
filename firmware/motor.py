@@ -16,6 +16,7 @@ from config import (
     MAX_SPEED, TURN_RATE
 )
 from utils import clamp, debug_print
+import calibration
 
 
 class Motor:
@@ -112,6 +113,13 @@ class DifferentialDrive:
         if not self.enabled:
             return
         
+        # Get calibration data
+        cal = calibration.get_calibration()
+        
+        # Apply steering trim (only when there's throttle)
+        if abs(throttle) > 0.05:
+            steer += cal.steering_trim
+        
         # Apply config limits
         throttle = clamp(throttle, -1.0, 1.0) * MAX_SPEED
         steer = clamp(steer, -1.0, 1.0) * TURN_RATE
@@ -131,6 +139,10 @@ class DifferentialDrive:
         else:
             left_speed = left_speed_raw
             right_speed = right_speed_raw
+        
+        # Apply motor balance calibration
+        left_speed = left_speed * cal.motor_left_scale
+        right_speed = right_speed * cal.motor_right_scale
         
         # Final safety clamp (should be redundant after normalization)
         left_speed = clamp(left_speed, -1.0, 1.0)

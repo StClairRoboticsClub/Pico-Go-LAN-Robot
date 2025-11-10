@@ -1,0 +1,417 @@
+# Multi-Agent Configuration for Pico-Go LAN Robot Project
+# This file defines agent roles, file ownership, and task routing rules
+
+agents:
+  director:
+    id: "director"
+    name: "Director (Main Coordinator)"
+    role: "coordinator"
+    description: "Single point of command for entire project. Receives all requests, delegates to specialized agents, and integrates results."
+    
+    ownership:
+      directories:
+        - "/"
+      files:
+        - "README.md"
+        - "ARCHITECTURE.md"
+        - "CHANGELOG.md"
+    
+    responsibilities:
+      - "Task classification and routing"
+      - "Quality control and integration"
+      - "Architectural decisions"
+      - "Cross-agent coordination"
+      - "Project-level documentation"
+    
+    coordination_rules:
+      - "All tasks flow through Director"
+      - "Director approves all merges"
+      - "Director maintains architectural consistency"
+      - "Director generates integration summaries"
+
+  firmware:
+    id: "firmware"
+    name: "Firmware & Hardware Agent"
+    role: "specialist"
+    description: "Owns firmware development and hardware interfaces for Raspberry Pi Pico W."
+    
+    ownership:
+      directories:
+        - "/firmware"
+        - "/schematics"
+      files:
+        - "firmware/**/*.py"
+        - "firmware/**/*.md"
+        - "schematics/**/*"
+    
+    responsibilities:
+      - "MicroPython module development"
+      - "Hardware integration and validation"
+      - "Watchdog and fail-safe logic"
+      - "PWM and motor control"
+      - "Firmware testing and performance"
+    
+    key_modules:
+      - "wifi.py"
+      - "ws_server.py"
+      - "motor.py"
+      - "watchdog.py"
+      - "lcd_status.py"
+      - "config.py"
+    
+    quality_metrics:
+      control_latency: "≤20ms"
+      fail_safe_timeout: "≤200ms"
+      watchdog_timeout: "<200ms"
+    
+    code_standards:
+      - "MicroPython conventions"
+      - "Safe boot logic"
+      - "Hardware validation required"
+
+  controller:
+    id: "controller"
+    name: "Controller & Network Agent"
+    role: "specialist"
+    description: "Owns controller-side code and LAN communication logic."
+    
+    ownership:
+      directories:
+        - "/controller"
+      files:
+        - "controller/**/*.py"
+        - "controller/**/*.md"
+        - "controller/**/*.yaml"
+        - "controller/**/*.json"
+    
+    responsibilities:
+      - "Controller application development"
+      - "WebSocket client implementation"
+      - "Input mapping and optimization"
+      - "Network configuration"
+      - "LAN communication testing"
+    
+    key_files:
+      - "controller_xbox.py"
+      - "websocket_client.py"
+      - "input_mapper.py"
+    
+    quality_metrics:
+      network_latency: "<50ms end-to-end"
+      reconnect_time: "<5s"
+      packet_delivery: ">99%"
+    
+    code_standards:
+      - "PEP8 Python conventions"
+      - "Graceful error handling"
+      - "Network testing required"
+
+  documentation:
+    id: "documentation"
+    name: "Documentation & Performance Agent"
+    role: "specialist"
+    description: "Maintains documentation, runs performance tests, and ensures reproducibility."
+    
+    ownership:
+      directories:
+        - "/docs"
+      files:
+        - "docs/**/*.md"
+        - "docs/**/*.png"
+        - "docs/**/*.jpg"
+        - "docs/**/*.svg"
+        - "docs/**/*.pdf"
+    
+    responsibilities:
+      - "Documentation maintenance"
+      - "Performance testing and reporting"
+      - "Reproducibility validation"
+      - "Quick-start guide creation"
+      - "Architecture diagram updates"
+    
+    key_documents:
+      - "README.md"
+      - "LAN_SETUP.md"
+      - "TEST_PLAN.md"
+      - "ARCHITECTURE.md"
+    
+    quality_metrics:
+      documentation_accuracy: "100% (must reflect implementation)"
+      reproducibility: "New developer can rebuild from docs alone"
+      test_coverage: "All major features documented"
+    
+    code_standards:
+      - "Clear, concise technical writing"
+      - "Step-by-step procedures"
+      - "Visual diagrams where helpful"
+
+# Task Routing Rules
+task_routing:
+  # Feature requests
+  features:
+    firmware_related:
+      - "motor control"
+      - "sensor integration"
+      - "watchdog improvements"
+      - "PWM optimization"
+      - "hardware interface"
+      - "boot logic"
+      - "fail-safe"
+      agent: "firmware"
+      requires_coordination: []
+    
+    controller_related:
+      - "input mapping"
+      - "controller interface"
+      - "websocket communication"
+      - "network configuration"
+      - "reconnection logic"
+      - "packet structure"
+      agent: "controller"
+      requires_coordination: []
+    
+    documentation_related:
+      - "documentation update"
+      - "quick start guide"
+      - "architecture diagram"
+      - "performance report"
+      - "testing procedure"
+      agent: "documentation"
+      requires_coordination: []
+    
+    cross_agent:
+      - "new feature requiring firmware and controller"
+      - "performance optimization across layers"
+      - "major architectural change"
+      agent: "director"
+      requires_coordination:
+        - "firmware"
+        - "controller"
+        - "documentation"
+
+  # Bug reports
+  bugs:
+    firmware_bugs:
+      - "motor not responding"
+      - "watchdog timeout"
+      - "PWM instability"
+      - "hardware connection issue"
+      - "boot failure"
+      - "sensor reading error"
+      agent: "firmware"
+      requires_coordination: []
+    
+    controller_bugs:
+      - "connection lost"
+      - "input not working"
+      - "websocket error"
+      - "network configuration issue"
+      - "packet delivery failure"
+      agent: "controller"
+      requires_coordination: []
+    
+    documentation_bugs:
+      - "documentation outdated"
+      - "procedure doesn't work"
+      - "missing information"
+      - "incorrect instructions"
+      agent: "documentation"
+      requires_coordination: []
+    
+    integration_bugs:
+      - "firmware and controller mismatch"
+      - "protocol incompatibility"
+      - "cross-layer performance issue"
+      agent: "director"
+      requires_coordination:
+        - "firmware"
+        - "controller"
+
+  # Performance tasks
+  performance:
+    firmware_performance:
+      - "control latency optimization"
+      - "watchdog timing"
+      - "PWM frequency"
+      - "boot time"
+      agent: "firmware"
+      requires_coordination: []
+    
+    controller_performance:
+      - "network latency"
+      - "websocket overhead"
+      - "input processing speed"
+      - "reconnection time"
+      agent: "controller"
+      requires_coordination: []
+    
+    system_performance:
+      - "end-to-end latency"
+      - "overall system optimization"
+      - "cross-layer performance"
+      agent: "director"
+      requires_coordination:
+        - "firmware"
+        - "controller"
+        - "documentation"
+
+# File Ownership Mappings
+file_ownership:
+  firmware:
+    patterns:
+      - "firmware/**"
+      - "schematics/**"
+      - "**/firmware/**"
+    agent: "firmware"
+  
+  controller:
+    patterns:
+      - "controller/**"
+      - "**/controller/**"
+    agent: "controller"
+  
+  documentation:
+    patterns:
+      - "docs/**"
+      - "**/docs/**"
+      - "README.md"
+      - "*.md"
+    agent: "documentation"
+    note: "README.md and root .md files owned by Director, but Documentation agent maintains them"
+  
+  shared:
+    patterns:
+      - ".gitignore"
+      - "requirements.txt"
+      - "setup.py"
+      - "pyproject.toml"
+    agent: "director"
+    note: "Shared files require Director coordination before modification"
+
+# Coordination Dependencies
+coordination_dependencies:
+  firmware_to_controller:
+    description: "Firmware protocol changes require controller updates"
+    trigger: "Protocol or packet structure changes"
+    coordination: "director"
+    affected_agents:
+      - "controller"
+      - "documentation"
+  
+  controller_to_firmware:
+    description: "Controller feature requests may require firmware support"
+    trigger: "New controller features needing firmware changes"
+    coordination: "director"
+    affected_agents:
+      - "firmware"
+      - "documentation"
+  
+  any_to_documentation:
+    description: "All code changes require documentation updates"
+    trigger: "Any firmware or controller change"
+    coordination: "director"
+    affected_agents:
+      - "documentation"
+
+# Quality Gates
+quality_gates:
+  firmware:
+    - name: "Control Latency"
+      metric: "≤20ms"
+      test: "Measure time from command receipt to motor response"
+      required: true
+    
+    - name: "Fail-Safe Stop"
+      metric: "≤200ms"
+      test: "Measure time from watchdog trigger to motor stop"
+      required: true
+    
+    - name: "Code Style"
+      metric: "MicroPython conventions"
+      test: "Code review and linting"
+      required: true
+  
+  controller:
+    - name: "Network Latency"
+      metric: "<50ms end-to-end"
+      test: "Measure round-trip time for commands"
+      required: true
+    
+    - name: "Reconnection Time"
+      metric: "<5s"
+      test: "Measure time to reconnect after disconnection"
+      required: true
+    
+    - name: "Code Style"
+      metric: "PEP8"
+      test: "Code review and linting"
+      required: true
+  
+  documentation:
+    - name: "Accuracy"
+      metric: "100% (reflects implementation)"
+      test: "Reproducibility validation by new developer"
+      required: true
+    
+    - name: "Completeness"
+      metric: "All features documented"
+      test: "Documentation audit"
+      required: true
+
+# Integration Points
+integration_points:
+  firmware_controller:
+    description: "WebSocket protocol and JSON packet structure"
+    owner: "director"
+    coordination_required: true
+    files:
+      - "firmware/ws_server.py"
+      - "controller/websocket_client.py"
+      - "controller/packet_structure.json"
+  
+  firmware_documentation:
+    description: "Firmware API and hardware requirements"
+    owner: "director"
+    coordination_required: true
+    files:
+      - "firmware/**/*.py"
+      - "docs/API.md"
+      - "docs/HARDWARE.md"
+  
+  controller_documentation:
+    description: "Controller usage and network setup"
+    owner: "director"
+    coordination_required: true
+    files:
+      - "controller/**/*.py"
+      - "docs/LAN_SETUP.md"
+      - "docs/USAGE.md"
+
+# Workflow Configuration
+workflow:
+  default_flow:
+    - "director receives request"
+    - "director classifies task"
+    - "director delegates to specialist"
+    - "specialist completes work"
+    - "specialist reports to director"
+    - "director integrates and tests"
+    - "director updates documentation (or delegates)"
+    - "director marks complete"
+  
+  parallel_flow:
+    enabled: true
+    conditions:
+      - "Tasks are independent"
+      - "No file ownership conflicts"
+      - "No protocol changes"
+    coordination: "director"
+  
+  sequential_flow:
+    enabled: true
+    conditions:
+      - "Tasks have dependencies"
+      - "Protocol or architecture changes"
+      - "Cross-agent coordination needed"
+    coordination: "director"
+

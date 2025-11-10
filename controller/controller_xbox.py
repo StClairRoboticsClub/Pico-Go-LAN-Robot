@@ -30,11 +30,12 @@ import time
 import sys
 import socket
 import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # Suppress pygame message
 import struct
 import subprocess
 from typing import Optional, List, Dict
-
 import pygame
+# Removed terminal/TUI imports - using pygame window instead
 
 
 # ============================================================================
@@ -215,7 +216,7 @@ def get_all_local_networks() -> List[str]:
     return networks
 
 
-def discover_robots_on_network(timeout: float = 3.0) -> List[Dict]:
+def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
     """
     Broadcast discovery request and collect robot responses.
     Scans ALL local network interfaces to find robots.
@@ -226,40 +227,27 @@ def discover_robots_on_network(timeout: float = 3.0) -> List[Dict]:
     Returns:
         List of robot info dicts with 'robot_id', 'hostname', 'ip', 'version'
     """
-    print(f"🔍 Broadcasting discovery request...")
-    
     robots = []
     
     try:
         # Create UDP socket for broadcast
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.settimeout(0.5)  # 500ms timeout for receives
+        sock.settimeout(0.3)  # 300ms timeout for receives (faster)
         
         # Get ALL local networks (not just one!)
         networks = get_all_local_networks()
-        print(f"   Scanning networks: {', '.join(networks)}")
         
-        # Send discovery to all networks
+        # Send discovery to all networks (optimized - broadcast only, no individual IP scan)
         discovery_msg = json.dumps({"cmd": "discover", "seq": 0}).encode()
         
         for network_prefix in networks:
-            # Try broadcast first
+            # Broadcast only (much faster than scanning 254 IPs per network)
             broadcast_addr = f"{network_prefix}.255"
             try:
                 sock.sendto(discovery_msg, (broadcast_addr, ROBOT_PORT))
             except:
                 pass
-            
-            # Also scan common robot IPs directly (expanded range to include DHCP addresses)
-            for last_octet in range(1, 255):
-                target_ip = f"{network_prefix}.{last_octet}"
-                try:
-                    sock.sendto(discovery_msg, (target_ip, ROBOT_PORT))
-                except:
-                    pass
-        
-        print(f"   Listening for responses...")
         
         # Collect responses
         start_time = time.time()
@@ -283,31 +271,17 @@ def discover_robots_on_network(timeout: float = 3.0) -> List[Dict]:
                         "hostname": response.get("hostname", "unknown"),
                         "ip": robot_ip,
                         "version": response.get("version", "?"),
-                        "color": response.get("color", [255, 255, 255])  # RGB tuple
+                        "color": response.get("color", [255, 255, 255]),  # RGB tuple
+                        "calibration": response.get("calibration", {})  # Calibration data
                     }
                     robots.append(robot_info)
                     
-                    # Format color display
-                    color_rgb = robot_info['color']
-                    color_str = f"RGB({color_rgb[0]},{color_rgb[1]},{color_rgb[2]})"
-                    
-                    # Try to get ANSI color for terminal display
-                    try:
-                        ansi_color = f"\033[38;2;{color_rgb[0]};{color_rgb[1]};{color_rgb[2]}m●\033[0m"
-                    except:
-                        ansi_color = "●"
-                    
-                    print(f"   ✅ Found: {ansi_color} Robot #{robot_info['robot_id']} ({robot_info['hostname']}) at {robot_ip} - {color_str}")
-            
             except socket.timeout:
                 continue
             except Exception as e:
                 continue
         
         sock.close()
-        
-        elapsed = time.time() - start_time
-        print(f"   Discovery complete: {len(robots)} robot(s) found in {elapsed:.1f}s\n")
         
         return robots
     
@@ -383,23 +357,17 @@ def discover_and_select_robot() -> str:
     Returns:
         Robot IP address or None
     """
-    print("\n" + "="*60)
-    print("🤖 ROBOT DISCOVERY")
-    print("="*60)
+    print("🔍 Discovering robots...", end='', flush=True)
     
-    # Discover robots using UDP broadcast
-    robots = discover_robots_on_network(timeout=3.0)
+    # Discover robots using UDP broadcast (faster timeout)
+    robots = discover_robots_on_network(timeout=1.5)
+    
+    print(f"\r{' ' * 50}\r", end='')  # Clear discovery line
     
     if len(robots) == 0:
         # No robots found
-        print("❌ No robots found on network\n")
-        print("   Troubleshooting:")
-        print("   1. Is the robot powered on?")
-        print("   2. Is the robot connected to WiFi? (Check LCD)")
-        print("   3. Are you on the same network?")
-        print("   4. Check robot's IP address on LCD screen\n")
-        
-        # Offer manual entry
+        print("❌ No robots found")
+        print("   Troubleshooting: Check robot power, WiFi, and network connection")
         manual = input("   Enter IP manually? (y/n): ").strip().lower()
         if manual == 'y':
             return prompt_for_robot_ip()
@@ -408,23 +376,19 @@ def discover_and_select_robot() -> str:
     elif len(robots) == 1:
         # Exactly one robot found - auto-select
         robot = robots[0]
-        print(f"✅ Found 1 robot:")
-        print(f"   Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}")
-        print(f"   Auto-connecting...\n")
+        print(f"✅ Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}")
         save_cached_robot(robot['ip'])
         return robot['ip']
     
     else:
         # Multiple robots found - let user choose
-        print(f"📋 Found {len(robots)} robots:\n")
+        print(f"📋 Found {len(robots)} robots:")
         for i, robot in enumerate(robots, 1):
             print(f"   {i}. Robot #{robot['robot_id']} ({robot['hostname']}) - {robot['ip']}")
         
-        print()
-        
         while True:
             try:
-                choice = input(f"Select robot (1-{len(robots)}) or 'q' to quit: ").strip()
+                choice = input(f"\nSelect (1-{len(robots)}) or 'q': ").strip()
                 
                 if choice.lower() == 'q':
                     return None
@@ -432,14 +396,13 @@ def discover_and_select_robot() -> str:
                 idx = int(choice) - 1
                 if 0 <= idx < len(robots):
                     robot = robots[idx]
-                    print(f"\n✅ Selected: Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}\n")
                     save_cached_robot(robot['ip'])
                     return robot['ip']
                 else:
-                    print(f"❌ Please enter a number between 1 and {len(robots)}")
+                    print(f"❌ Enter 1-{len(robots)}")
             
             except ValueError:
-                print("❌ Please enter a valid number or 'q'")
+                print("❌ Invalid input")
             except KeyboardInterrupt:
                 print("\n❌ Cancelled")
                 return None
@@ -532,13 +495,10 @@ def resolve_robot_address(address: str) -> str:
         address = f"{address}.local"
     
     try:
-        print(f"🔍 Resolving {address}...")
         resolved_ip = socket.gethostbyname(address)
-        print(f"✅ Resolved to {resolved_ip}")
         return resolved_ip
     except socket.gaierror:
-        print(f"⚠️  Could not resolve {address}, using as-is")
-        return address
+        return address  # Return as-is if can't resolve
 
 
 def apply_deadzone(value: float, threshold: float = DEAD_ZONE) -> float:
@@ -606,22 +566,33 @@ def apply_expo(value: float, expo: float = 2.0) -> float:
 
 class KeyboardController:
     """
-    Keyboard input handler as fallback when no Xbox controller is available.
-    Creates a small pygame window to capture keyboard events.
+    Enhanced keyboard input handler with improved pygame window.
+    Modern UI with visual feedback and better layout.
     """
     
     def __init__(self):
-        """Initialize keyboard controller with pygame window."""
+        """Initialize keyboard controller with improved pygame window."""
         pygame.init()
         
-        # Create a small window to capture keyboard events
-        self.screen = pygame.display.set_mode((400, 300))
-        pygame.display.set_caption("🤖 Robot Keyboard Controller")
+        # Window configuration
+        self.window_width = 600
+        self.window_height = 500
+        self.bg_color = (20, 20, 30)  # Dark blue-gray
+        self.accent_color = (100, 200, 255)  # Light blue
+        self.text_color = (255, 255, 255)  # White
+        self.success_color = (100, 255, 100)  # Green
+        self.warning_color = (255, 200, 100)  # Orange
         
-        # Set up font for displaying controls
+        # Create window
+        self.screen = pygame.display.set_mode((self.window_width, self.window_height))
+        pygame.display.set_caption("🤖 Pico-Go LAN Robot - Keyboard Controller")
+        
+        # Set up fonts
         pygame.font.init()
-        self.font = pygame.font.Font(None, 24)
-        self.small_font = pygame.font.Font(None, 18)
+        self.title_font = pygame.font.Font(None, 36)
+        self.header_font = pygame.font.Font(None, 24)
+        self.body_font = pygame.font.Font(None, 20)
+        self.value_font = pygame.font.Font(None, 32)
         
         self.connected = True
         
@@ -635,43 +606,124 @@ class KeyboardController:
         self.throttle_decay = 0.95  # Throttle decay when no input
         self.steer_decay = 0.90     # Steering decay when no input
         
-        print("⌨️  Keyboard controller initialized")
-        print("   A pygame window will open - keep it focused!")
-        print("   W/S: Throttle forward/reverse")
-        print("   A/D: Steer left/right")
-        print("   Space: Brake (stop)")
-        print("   ESC: Exit")
+        # Initial render
+        self._draw_ui()
     
     def _draw_ui(self):
-        """Draw control UI in the pygame window."""
+        """Draw improved UI in the pygame window."""
         # Clear screen
-        self.screen.fill((20, 20, 30))
+        self.screen.fill(self.bg_color)
         
-        # Title
-        title = self.font.render("Robot Keyboard Controller", True, (255, 255, 255))
-        self.screen.blit(title, (50, 20))
+        # Title bar
+        title_rect = pygame.Rect(0, 0, self.window_width, 50)
+        pygame.draw.rect(self.screen, (30, 30, 45), title_rect)
+        title_text = self.title_font.render("🤖 Pico-Go LAN Robot", True, self.accent_color)
+        self.screen.blit(title_text, (20, 12))
+        subtitle_text = self.body_font.render("Keyboard Controller", True, (200, 200, 200))
+        self.screen.blit(subtitle_text, (20, 35))
         
-        # Controls
         y = 70
+        
+        # Controls section
+        controls_header = self.header_font.render("Controls", True, self.accent_color)
+        self.screen.blit(controls_header, (20, y))
+        y += 30
+        
         controls = [
-            "W - Forward",
-            "S - Reverse",
-            "A - Steer Left",
-            "D - Steer Right",
-            "SPACE - Brake",
-            "ESC - Exit"
+            ("W / S", "Throttle forward/reverse"),
+            ("A / D", "Steer left/right"),
+            ("SPACE", "Brake (rapid stop)"),
+            ("ESC", "Exit")
         ]
-        for control in controls:
-            text = self.small_font.render(control, True, (200, 200, 200))
-            self.screen.blit(text, (50, y))
+        
+        for key, desc in controls:
+            key_text = self.body_font.render(key, True, self.warning_color)
+            desc_text = self.body_font.render(desc, True, self.text_color)
+            self.screen.blit(key_text, (40, y))
+            self.screen.blit(desc_text, (120, y))
             y += 25
         
-        # Current values
         y += 20
-        throttle_text = self.font.render(f"Throttle: {self.throttle:+.2f}", True, (100, 255, 100))
-        steer_text = self.font.render(f"Steering: {self.steer:+.2f}", True, (100, 200, 255))
-        self.screen.blit(throttle_text, (50, y))
-        self.screen.blit(steer_text, (50, y + 30))
+        
+        # Status section with visual bars
+        status_header = self.header_font.render("Status", True, self.accent_color)
+        self.screen.blit(status_header, (20, y))
+        y += 30
+        
+        # Throttle display
+        throttle_label = self.body_font.render("Throttle:", True, self.text_color)
+        self.screen.blit(throttle_label, (40, y))
+        
+        # Throttle bar
+        bar_width = 300
+        bar_height = 30
+        bar_x = 120
+        bar_y = y - 5
+        
+        # Background bar
+        pygame.draw.rect(self.screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
+        
+        # Throttle value bar (green for forward, red for reverse)
+        throttle_width = int(abs(self.throttle) * bar_width)
+        if self.throttle > 0:
+            bar_color = self.success_color  # Green for forward
+        elif self.throttle < 0:
+            bar_color = (255, 100, 100)  # Red for reverse
+        else:
+            bar_color = (60, 60, 60)  # Gray for neutral
+        
+        if throttle_width > 0:
+            if self.throttle > 0:
+                pygame.draw.rect(self.screen, bar_color, (bar_x, bar_y, throttle_width, bar_height))
+            else:
+                pygame.draw.rect(self.screen, bar_color, (bar_x + bar_width - throttle_width, bar_y, throttle_width, bar_height))
+        
+        # Center line
+        pygame.draw.line(self.screen, (100, 100, 100), (bar_x + bar_width // 2, bar_y), 
+                        (bar_x + bar_width // 2, bar_y + bar_height), 2)
+        
+        # Throttle value text
+        throttle_value = self.value_font.render(f"{self.throttle:+.2f}", True, self.text_color)
+        self.screen.blit(throttle_value, (bar_x + bar_width + 10, y - 2))
+        
+        y += 50
+        
+        # Steering display
+        steer_label = self.body_font.render("Steering:", True, self.text_color)
+        self.screen.blit(steer_label, (40, y))
+        
+        # Steering bar
+        bar_y = y - 5
+        
+        # Background bar
+        pygame.draw.rect(self.screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
+        
+        # Steering value bar (blue)
+        steer_width = int(abs(self.steer) * bar_width)
+        if steer_width > 0:
+            steer_x = bar_x + (bar_width // 2) - (steer_width // 2)
+            if self.steer > 0:
+                # Right turn
+                pygame.draw.rect(self.screen, self.accent_color, 
+                               (bar_x + bar_width // 2, bar_y, steer_width // 2, bar_height))
+            else:
+                # Left turn
+                pygame.draw.rect(self.screen, self.accent_color, 
+                               (bar_x + bar_width // 2 - steer_width // 2, bar_y, steer_width // 2, bar_height))
+        
+        # Center line
+        pygame.draw.line(self.screen, (100, 100, 100), (bar_x + bar_width // 2, bar_y), 
+                        (bar_x + bar_width // 2, bar_y + bar_height), 2)
+        
+        # Steering value text
+        steer_value = self.value_font.render(f"{self.steer:+.2f}", True, self.text_color)
+        self.screen.blit(steer_value, (bar_x + bar_width + 10, y - 2))
+        
+        y += 60
+        
+        # Instructions
+        info_text = self.body_font.render("Keep this window focused to control the robot", True, (150, 150, 150))
+        self.screen.blit(info_text, (20, y))
         
         pygame.display.flip()
     
@@ -760,6 +812,10 @@ class KeyboardController:
     def is_connected(self) -> bool:
         """Check if keyboard is available."""
         return self.connected
+    
+    def cleanup(self):
+        """Cleanup pygame resources."""
+        pygame.quit()
 
 
 class XboxController:
@@ -782,17 +838,13 @@ class XboxController:
         joystick_count = pygame.joystick.get_count()
         
         if joystick_count == 0:
-            print("⚠️  No Xbox controller detected")
-            return
+            return  # Silent - will fall back to keyboard
         
         # Use first controller
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.init()
         self.connected = True
-        
-        print(f"✅ Xbox controller connected: {self.joystick.get_name()}")
-        print(f"   Axes: {self.joystick.get_numaxes()}")
-        print(f"   Buttons: {self.joystick.get_numbuttons()}")
+        # Silent success
     
     def get_axes(self) -> tuple[float, float]:
         """
@@ -938,10 +990,15 @@ class RobotConnection:
         self.sock = None
         self.connected = False
         self.seq_num = 0
+        self.calibration = {
+            "steering_trim": 0.0,
+            "motor_left_scale": 1.0,
+            "motor_right_scale": 1.0
+        }
     
     async def connect(self) -> bool:
         """
-        Initialize UDP socket (no connection needed).
+        Initialize UDP socket and request calibration data.
         
         Returns:
             True if initialized successfully, False otherwise
@@ -949,24 +1006,62 @@ class RobotConnection:
         try:
             import socket
             
-            print(f"🔌 Initializing UDP socket for robot at {self.robot_ip}:{self.robot_port}...")
-            
             # Create UDP socket
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.settimeout(0.5)  # 500ms timeout for calibration request (faster)
             
             # No connection needed for UDP - just send!
             self.connected = True
-            print(f"✅ UDP socket ready! (connectionless, low latency)")
+            
+            # Request calibration data during connection (non-blocking)
+            await self._request_calibration()
+            
             return True
         
         except Exception as e:
-            print(f"❌ Socket initialization failed: {e}")
+            print(f"❌ Connection failed: {e}")
             self.connected = False
             return False
+    
+    async def _request_calibration(self):
+        """Request calibration data from robot during connection."""
+        if not self.sock:
+            return
+        
+        try:
+            packet = {
+                "cmd": "get_calibration",
+                "seq": self.seq_num,
+                "ts": int(time.time() * 1000)
+            }
+            
+            message = json.dumps(packet).encode()
+            self.sock.sendto(message, (self.robot_ip, self.robot_port))
+            self.seq_num += 1
+            
+            # Wait for response (short timeout)
+            try:
+                data, _ = self.sock.recvfrom(4096)
+                response = json.loads(data.decode().strip())
+                
+                if "calibration" in response:
+                    self.calibration = response["calibration"]
+                # Silent success - calibration loaded
+            except socket.timeout:
+                pass  # Silent timeout - use defaults
+            except Exception:
+                pass  # Silent error - use defaults
+            
+            # Reset timeout for normal operation (UDP is connectionless)
+            self.sock.settimeout(0)  # Non-blocking for normal operation
+            
+        except Exception:
+            pass  # Silent error - use defaults
     
     async def send_drive_command(self, throttle: float, steer: float) -> bool:
         """
         Send drive command to robot via UDP (instant, fire-and-forget).
+        Applies calibration before sending.
         
         Args:
             throttle: Throttle value (-1.0 to 1.0)
@@ -979,6 +1074,12 @@ class RobotConnection:
             return False
         
         try:
+            # Apply calibration (steering trim only when there's throttle)
+            calibrated_steer = steer
+            if abs(throttle) > 0.05:
+                calibrated_steer = steer + self.calibration.get("steering_trim", 0.0)
+                calibrated_steer = clamp(calibrated_steer)
+            
             # Build command packet with timestamp
             packet = {
                 "ts": int(time.time() * 1000),  # Timestamp in milliseconds
@@ -986,7 +1087,7 @@ class RobotConnection:
                 "cmd": "drive",
                 "axes": {
                     "throttle": round(throttle, 3),
-                    "steer": round(steer, 3)
+                    "steer": round(calibrated_steer, 3)
                 }
             }
             
@@ -1034,13 +1135,24 @@ class RobotConnection:
             print(f"❌ Send error: {e}")
             return False
     
+    def set_calibration(self, calibration_data: dict):
+        """
+        Update calibration data (e.g., from discovery response).
+        
+        Args:
+            calibration_data: Dictionary with calibration values
+        """
+        if calibration_data:
+            self.calibration.update(calibration_data)
+            # Silent update - no verbose output
+    
     async def disconnect(self):
         """Close UDP socket."""
         if self.sock:
             self.sock.close()
         
         self.connected = False
-        print("🔌 UDP socket closed")
+        # Silent disconnect
 
 
 # ============================================================================
@@ -1066,7 +1178,6 @@ class ControllerApp:
         self.controller_type = "Xbox"
         
         if not self.controller.is_connected():
-            print("🔄 Falling back to keyboard controls...")
             self.controller = KeyboardController()
             self.controller_type = "Keyboard"
         
@@ -1077,40 +1188,31 @@ class ControllerApp:
         # Statistics
         self.packets_sent = 0
         self.start_time = time.time()
+        self.robot_calibration = None  # Will be set from discovery or connection
     
     async def run(self):
         """Run the controller application."""
         self.running = True
         
-        # Controller is guaranteed to be connected (either Xbox or Keyboard)
-                # Connect to robot
+        # Connect to robot
+        print("🔌 Connecting...", end='', flush=True)
         while self.running and not self.connection.connected:
             if not await self.connection.connect():
-                print(f"⏳ Retrying in {RECONNECT_DELAY}s...")
+                print(f"\r⏳ Retrying...", end='', flush=True)
                 await asyncio.sleep(RECONNECT_DELAY)
         
         if not self.running:
             return
         
-        print("\n" + "="*60)
-        if self.controller_type == "Xbox":
-            print("🎮 XBOX CONTROLLER ACTIVE")
-            print("="*60)
-            print("Right Trigger: Forward throttle")
-            print("Left Trigger: Reverse throttle")
-            print("Left Stick X: Steering (right = clockwise)")
-            print("BACK + START: Toggle charging mode (low power)")
-            print("START (alone): Exit")
+        if self.controller_type == "Keyboard":
+            # For keyboard, connection message goes on stats line
+            with self.controller._display_lock:
+                stats_line = getattr(self.controller, '_stats_line', 11)
+                sys.stdout.write(f"\033[{stats_line};1H\033[K✅ Connected to {self.robot_ip}\n")
+                sys.stdout.flush()
         else:
-            print("⌨️  KEYBOARD CONTROLLER ACTIVE")
-            print("="*60)
-            print("Keep the pygame window focused!")
-            print("W/S: Throttle forward/reverse")
-            print("A/D: Steer left/right")
-            print("Space: Brake (quick stop)")
-            print("ESC: Exit")
-        print("="*60)
-        print("="*60 + "\n")
+            print(f"\r{' ' * 50}\r✅ Connected to {self.robot_ip}", flush=True)
+            print("🎮 Controls: RT=Forward, LT=Reverse, LS=Steer, START=Exit")
         
         # Main control loop
         last_update = time.time()
@@ -1148,12 +1250,10 @@ class ControllerApp:
                     # Only exit if START pressed without BACK
                     if (self.controller.get_button(BUTTON_START) and 
                         not self.controller.get_button(BUTTON_BACK)):
-                        print("\n🛑 START button pressed - exiting...")
                         break
                 else:
                     # Keyboard uses ESC handled in KeyboardController
                     if self.controller.get_button(BUTTON_START):
-                        print("\n🛑 EXIT requested - shutting down...")
                         break
                 
                 # Rate limiting
@@ -1168,19 +1268,18 @@ class ControllerApp:
                     if await self.connection.send_drive_command(throttle, steer):
                         self.packets_sent += 1
                         
-                        # Print status (every 30 packets = 1 second at 30 Hz)
+                        # Print status (overwrites same line)
                         if self.packets_sent % 30 == 0:
                             runtime = time.time() - self.start_time
                             rate = self.packets_sent / runtime if runtime > 0 else 0
-                            print(f"📊 Packets: {self.packets_sent} | "
-                                  f"Rate: {rate:.1f} Hz | "
-                                  f"T: {throttle:+.2f} | S: {steer:+.2f}")
+                            print(f"\r📊 {self.packets_sent} pkts | {rate:.1f} Hz | T:{throttle:+.2f} S:{steer:+.2f}", end='', flush=True)
                     else:
                         # Connection lost - try to reconnect
-                        print("⚠️  Connection lost - reconnecting...")
+                        print("\r⚠️  Reconnecting...", end='', flush=True)
                         if not await self.connection.connect():
                             await asyncio.sleep(RECONNECT_DELAY)
                             continue
+                        print(f"\r{' ' * 50}\r", end='', flush=True)  # Clear reconnect message
                     
                     last_update = now
                 
@@ -1188,14 +1287,14 @@ class ControllerApp:
                 await asyncio.sleep(0.001)
         
         except KeyboardInterrupt:
-            print("\n⚠️  Keyboard interrupt")
+            pass  # Silent interrupt
         
         finally:
+            # Don't print newline here - let shutdown handle cleanup
             await self.shutdown()
     
     async def shutdown(self):
         """Shutdown the application."""
-        print("\n🔄 Shutting down...")
         self.running = False
         
         # Send stop command
@@ -1206,17 +1305,16 @@ class ControllerApp:
         # Disconnect
         await self.connection.disconnect()
         
-        # Quit pygame
-        pygame.quit()
+        # Cleanup controllers
+        if self.controller_type == "Keyboard":
+            self.controller.cleanup()
+        elif self.controller_type == "Xbox":
+            pygame.quit()
         
-        # Print statistics
+        # Brief statistics
         runtime = time.time() - self.start_time
         avg_rate = self.packets_sent / runtime if runtime > 0 else 0
-        print(f"\n📊 Final Statistics:")
-        print(f"   Runtime: {runtime:.1f}s")
-        print(f"   Packets sent: {self.packets_sent}")
-        print(f"   Average rate: {avg_rate:.1f} Hz")
-        print("\n✅ Shutdown complete")
+        print(f"\n📊 {self.packets_sent} pkts in {runtime:.1f}s ({avg_rate:.1f} Hz avg)")
 
 
 # ============================================================================
@@ -1225,9 +1323,7 @@ class ControllerApp:
 
 def main():
     """Main entry point."""
-    print("="*60)
-    print("🤖 Pico-Go LAN Robot - Xbox Controller")
-    print("="*60)
+    print("🤖 Pico-Go LAN Robot Controller")
     
     robot_ip = None
     
@@ -1235,7 +1331,6 @@ def main():
     if len(sys.argv) > 1:
         # Manual mode: use specified IP/hostname
         robot_address = sys.argv[1]
-        print(f"\n📍 Manual mode: {robot_address}")
         robot_ip = resolve_robot_address(robot_address)
         if robot_ip:
             save_cached_robot(robot_ip)
@@ -1244,22 +1339,25 @@ def main():
         robot_ip = discover_and_select_robot()
     
     if robot_ip is None:
-        print("\n❌ No robot selected. Exiting.\n")
+        print("❌ No robot selected. Exiting.")
         sys.exit(0)
-    
-    print(f"\n{'='*60}")
-    print(f"🎯 Target Robot: {robot_ip}:{ROBOT_PORT}")
-    print(f"📡 Control Rate: {CONTROL_RATE_HZ} Hz")
-    print(f"🔒 Connection: Locked (until robot power cycle)")
-    print("="*60 + "\n")
     
     # Create and run application
     app = ControllerApp(robot_ip)
     
+    # If we discovered the robot, apply calibration from discovery
+    # (Otherwise it will be requested during connection)
+    if len(sys.argv) == 1:  # Auto-discovery mode
+        robots = discover_robots_on_network(timeout=1.0)
+        for robot in robots:
+            if robot['ip'] == robot_ip and robot.get('calibration'):
+                app.connection.set_calibration(robot['calibration'])
+                break
+    
     try:
         asyncio.run(app.run())
     except KeyboardInterrupt:
-        print("\n\n✅ Controller stopped by user")
+        pass  # Silent exit
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
         import traceback

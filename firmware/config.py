@@ -25,13 +25,16 @@ WEBSOCKET_HOST = "0.0.0.0"  # Listen on all interfaces
 ROBOT_ID = 1
 
 # Robot Name - Cool racing names to spark interest!
-# Change for each robot to give them personality
+# 8 configurable profiles (1-8)
 ROBOT_NAMES = {
     1: "THUNDER",
     2: "BLITZ",
     3: "NITRO",
     4: "TURBO",
-    5: "SPEED"
+    5: "SPEED",
+    6: "BOLT",
+    7: "FLASH",
+    8: "STORM"
 }
 ROBOT_NAME = ROBOT_NAMES.get(ROBOT_ID, f"RACER-{ROBOT_ID}")
 
@@ -105,12 +108,16 @@ UNDERGLOW_ENABLED = True  # Enable/disable underglow
 UNDERGLOW_BRIGHTNESS = 255  # Full brightness (0-255) - always 100%
 
 # Robot colors (RGB) - unique color per robot ID for identification
+# 8 configurable profiles matching ROBOT_NAMES
 ROBOT_COLORS = {
-    1: (255, 140, 0),    # THUNDER - Dark Orange (yellow-orange)
-    2: (0, 191, 255),    # BLITZ - Deep Sky Blue
-    3: (255, 69, 0),     # NITRO - Orange Red
-    4: (50, 205, 50),    # TURBO - Lime Green
-    5: (138, 43, 226)    # SPEED - Blue Violet
+    1: (255, 140, 0),    # THUNDER - Orange
+    2: (0, 255, 255),    # BLITZ - Cyan
+    3: (255, 0, 0),      # NITRO - Red
+    4: (0, 255, 0),      # TURBO - Green
+    5: (255, 255, 0),   # SPEED - Yellow
+    6: (138, 43, 226),  # BOLT - Purple
+    7: (255, 20, 147),  # FLASH - Pink
+    8: (0, 191, 255)    # STORM - Blue
 }
 ROBOT_COLOR = ROBOT_COLORS.get(ROBOT_ID, (255, 255, 255))  # Default to white
 
