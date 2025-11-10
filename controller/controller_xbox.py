@@ -600,11 +600,15 @@ class KeyboardController:
         self.throttle = 0.0
         self.steer = 0.0
         
-        # Control parameters
-        self.throttle_step = 0.05  # Throttle change per frame
-        self.steer_step = 0.05     # Steering change per frame
-        self.throttle_decay = 0.95  # Throttle decay when no input
-        self.steer_decay = 0.90     # Steering decay when no input
+        # Control parameters - tuned for responsiveness
+        self.throttle_step = 0.15  # Throttle change per frame (increased for faster response)
+        self.steer_step = 0.20     # Steering change per frame (increased for faster response)
+        self.throttle_decay = 0.85  # Throttle decay when no input (faster decay)
+        self.steer_decay = 0.80     # Steering decay when no input (faster decay)
+        
+        # UI update throttling (don't redraw every frame)
+        self.ui_update_counter = 0
+        self.ui_update_interval = 3  # Update UI every 3 frames (10 Hz instead of 30 Hz)
         
         # Initial render
         self._draw_ui()
@@ -664,7 +668,8 @@ class KeyboardController:
         pygame.draw.rect(self.screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
         
         # Throttle value bar (green for forward, red for reverse)
-        throttle_width = int(abs(self.throttle) * bar_width)
+        # Starts at center, extends right for forward, left for reverse
+        throttle_width = int(abs(self.throttle) * bar_width / 2)  # Half width since it extends from center
         if self.throttle > 0:
             bar_color = self.success_color  # Green for forward
         elif self.throttle < 0:
@@ -673,10 +678,13 @@ class KeyboardController:
             bar_color = (60, 60, 60)  # Gray for neutral
         
         if throttle_width > 0:
+            center_x = bar_x + bar_width // 2
             if self.throttle > 0:
-                pygame.draw.rect(self.screen, bar_color, (bar_x, bar_y, throttle_width, bar_height))
+                # Forward: extend right from center
+                pygame.draw.rect(self.screen, bar_color, (center_x, bar_y, throttle_width, bar_height))
             else:
-                pygame.draw.rect(self.screen, bar_color, (bar_x + bar_width - throttle_width, bar_y, throttle_width, bar_height))
+                # Reverse: extend left from center
+                pygame.draw.rect(self.screen, bar_color, (center_x - throttle_width, bar_y, throttle_width, bar_height))
         
         # Center line
         pygame.draw.line(self.screen, (100, 100, 100), (bar_x + bar_width // 2, bar_y), 
@@ -749,33 +757,36 @@ class KeyboardController:
         # Get current keyboard state
         keys = pygame.key.get_pressed()
         
-        # Throttle control (W/S keys)
+        # Throttle control (W/S keys) - more responsive
         if keys[pygame.K_w]:
             self.throttle = min(1.0, self.throttle + self.throttle_step)
         elif keys[pygame.K_s]:
             self.throttle = max(-1.0, self.throttle - self.throttle_step)
         elif keys[pygame.K_SPACE]:
-            # Brake - rapid stop
-            self.throttle *= 0.5
+            # Brake - rapid stop (more aggressive)
+            self.throttle *= 0.3
         else:
-            # Decay throttle toward zero when no input
+            # Decay throttle toward zero when no input (faster)
             self.throttle *= self.throttle_decay
             if abs(self.throttle) < 0.01:
                 self.throttle = 0.0
         
-        # Steering control (A/D keys)
+        # Steering control (A/D keys) - more responsive
         if keys[pygame.K_d]:
             self.steer = min(1.0, self.steer + self.steer_step)
         elif keys[pygame.K_a]:
             self.steer = max(-1.0, self.steer - self.steer_step)
         else:
-            # Decay steering toward zero when no input
+            # Decay steering toward zero when no input (faster)
             self.steer *= self.steer_decay
             if abs(self.steer) < 0.01:
                 self.steer = 0.0
         
-        # Update UI
-        self._draw_ui()
+        # Update UI only every N frames (reduces lag)
+        self.ui_update_counter += 1
+        if self.ui_update_counter >= self.ui_update_interval:
+            self._draw_ui()
+            self.ui_update_counter = 0
         
         # Apply steering trim when there's throttle
         steer_output = self.steer
@@ -1205,11 +1216,9 @@ class ControllerApp:
             return
         
         if self.controller_type == "Keyboard":
-            # For keyboard, connection message goes on stats line
-            with self.controller._display_lock:
-                stats_line = getattr(self.controller, '_stats_line', 11)
-                sys.stdout.write(f"\033[{stats_line};1H\033[K✅ Connected to {self.robot_ip}\n")
-                sys.stdout.flush()
+            # Keyboard controller uses pygame window, just print simple message
+            print(f"\r{' ' * 50}\r✅ Connected to {self.robot_ip}", flush=True)
+            print("⌨️  Controls: W/S=Throttle, A/D=Steer, SPACE=Brake, ESC=Exit")
         else:
             print(f"\r{' ' * 50}\r✅ Connected to {self.robot_ip}", flush=True)
             print("🎮 Controls: RT=Forward, LT=Reverse, LS=Steer, START=Exit")
