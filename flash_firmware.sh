@@ -27,7 +27,6 @@ cd firmware
 # Upload all Python files
 mpremote connect "$DEVICE" cp \
     calibration.py \
-    charging_mode.py \
     config.py \
     events.py \
     lcd_status.py \

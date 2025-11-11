@@ -773,8 +773,7 @@ class DisplayController:
                 ("RT", "Forward throttle"),
                 ("LT", "Reverse throttle"),
                 ("LS X", "Steering"),
-                ("START", "Exit"),
-                ("BACK+START", "Charging mode")
+                ("START", "Exit")
             ]
         
         for key, desc in controls:
@@ -1070,7 +1069,6 @@ class XboxController:
         
         self.joystick: Optional[pygame.joystick.Joystick] = None
         self.connected = False
-        self.back_was_pressed = False  # Track BACK button state for combo detection
         self._initialize_controller()
     
     def _initialize_controller(self):
@@ -1178,30 +1176,6 @@ class XboxController:
         
         pygame.event.pump()
         return self.joystick.get_button(button_id)
-    
-    def check_charging_combo(self) -> bool:
-        """
-        Check if charging mode button combo is pressed (BACK + START).
-        Returns True on combo press (rising edge), False otherwise.
-        """
-        if not self.connected:
-            return False
-        
-        pygame.event.pump()
-        
-        # Check if BACK is currently pressed
-        back_pressed = self.joystick.get_button(BUTTON_BACK)
-        start_pressed = self.joystick.get_button(BUTTON_START)
-        
-        # Detect rising edge of BACK button while START is held
-        combo_activated = False
-        if back_pressed and start_pressed and not self.back_was_pressed:
-            combo_activated = True
-        
-        # Update state for next check
-        self.back_was_pressed = back_pressed
-        
-        return combo_activated
     
     def is_connected(self) -> bool:
         """Check if controller is connected."""
@@ -1336,37 +1310,6 @@ class RobotConnection:
             self.sock.sendto(message, (self.robot_ip, self.robot_port))
             # NOTE: sendto() returns immediately - no blocking, no ACK wait
             # This is the fastest possible send operation!
-            
-            self.seq_num += 1
-            return True
-        
-        except Exception as e:
-            print(f"❌ Send error: {e}")
-            return False
-    
-    async def send_charging_command(self, enable: bool) -> bool:
-        """
-        Send charging mode command to robot.
-        
-        Args:
-            enable: True to enter charging mode, False to exit
-        
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        if not self.connected or not self.sock:
-            return False
-        
-        try:
-            packet = {
-                "ts": int(time.time() * 1000),
-                "seq": self.seq_num,
-                "cmd": "charging",
-                "enable": enable
-            }
-            
-            message = json.dumps(packet).encode()
-            self.sock.sendto(message, (self.robot_ip, self.robot_port))
             
             self.seq_num += 1
             return True
@@ -1743,7 +1686,6 @@ class ControllerApp:
         # Main control loop
         next_update_time = time.time()
         self.last_send_time = None  # Initialize for Hz tracking
-        charging_mode_active = False
         display_update_counter = 0
 
         # --- Button arming: require all relevant buttons to be released before accepting input ---
@@ -1775,15 +1717,7 @@ class ControllerApp:
                 except asyncio.QueueEmpty:
                     pass
                 
-                # Check for charging mode combo (BACK + START for Xbox)
-                if self.controller_type == "Xbox":
-                    if self.controller.check_charging_combo():
-                        charging_mode_active = not charging_mode_active
-                        await self.connection.send_charging_command(charging_mode_active)
-                        # Status shown in pygame window, no terminal output
-                        continue
-                
-                # Check for exit button (START only, not combo)
+                # Check for exit button
                 if self.controller_type == "Xbox":
                     # Only exit if START pressed without BACK
                     if (self.controller.get_button(BUTTON_START) and 

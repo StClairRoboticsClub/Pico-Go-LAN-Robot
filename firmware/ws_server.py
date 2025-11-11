@@ -16,7 +16,7 @@ import uasyncio as asyncio
 import time
 from config import WEBSOCKET_PORT, WEBSOCKET_HOST, STATE_CLIENT_OK, STATE_DRIVING, STATE_LINK_LOST
 from utils import debug_print
-from events import get_event_bus, EVENT_CHARGING_MODE_REQUESTED, EVENT_CLIENT_CONNECTED, EVENT_CLIENT_DISCONNECTED
+from events import get_event_bus, EVENT_CLIENT_CONNECTED, EVENT_CLIENT_DISCONNECTED
 import calibration
 
 
@@ -348,21 +348,6 @@ def _process_drive_command(packet, motor_controller, safety_controller, lcd_disp
     return True
 
 
-def _process_charging_command(packet):
-    """
-    Process charging mode command packet.
-    
-    Args:
-        packet: Parsed JSON packet
-    """
-    enable = packet.get("enable", False)
-    debug_print(f"Charging mode {'ENABLED' if enable else 'DISABLED'}", force=True)
-    
-    # Publish event instead of using global variable
-    event_bus = get_event_bus()
-    event_bus.publish(EVENT_CHARGING_MODE_REQUESTED, enable)
-
-
 def _process_get_calibration_command(packet, sock, addr):
     """
     Process get_calibration command - return current calibration data.
@@ -601,9 +586,6 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                         if _process_drive_command(packet, motor_controller, safety_controller, lcd_display, underglow, packets_received):
                             packets_received += 1
                     
-                    elif cmd == "charging":
-                        _process_charging_command(packet)
-                    
                 except Exception as e:
                     debug_print(f"Packet processing error: {e}", force=True)
             
@@ -657,9 +639,6 @@ async def handle_tcp_client(reader, writer, motor_controller, safety_controller,
                     # Use consolidated handler (with 200ms max age for TCP)
                     if not _process_drive_command(packet, motor_controller, safety_controller, lcd_display, None, 0, max_age_ms=200):
                         continue  # Skip stale command, don't feed watchdog
-                
-                elif cmd == "charging":
-                    _process_charging_command(packet)
                 
                 # No ACK needed - fire and forget for maximum performance
                 # Removing ACK reduces latency significantly

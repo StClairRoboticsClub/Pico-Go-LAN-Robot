@@ -25,7 +25,7 @@ class EventBus:
         Subscribe to an event type.
         
         Args:
-            event_type: Event type string (e.g., "charging_mode_requested")
+            event_type: Event type string (e.g., "client_connected")
             callback: Callback function to call when event occurs
         """
         if event_type not in self._subscribers:
@@ -79,7 +79,6 @@ def get_event_bus():
 
 
 # Event type constants
-EVENT_CHARGING_MODE_REQUESTED = "charging_mode_requested"
 EVENT_WIFI_DISCONNECTED = "wifi_disconnected"
 EVENT_CLIENT_CONNECTED = "client_connected"
 EVENT_CLIENT_DISCONNECTED = "client_disconnected"

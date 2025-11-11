@@ -20,7 +20,6 @@ import lcd_status
 import watchdog as wd
 import ws_server
 import underglow
-import charging_mode
 import calibration
 
 
@@ -37,17 +36,10 @@ class RobotController:
         self.safety_controller = None
         self.ws_server = None
         self.underglow = None
-        self.charging_mode = None
         self.running = False
-        self._charging_mode_requested = None  # Track charging mode requests
         
         debug_print("=== Pico-Go LAN Robot ===", force=True)
         debug_print("Initializing...", force=True)
-        
-        # Subscribe to charging mode events
-        from events import get_event_bus, EVENT_CHARGING_MODE_REQUESTED
-        event_bus = get_event_bus()
-        event_bus.subscribe(EVENT_CHARGING_MODE_REQUESTED, self._on_charging_mode_requested)
     
     async def initialize(self):
         """Initialize all subsystems in proper order."""
@@ -56,11 +48,7 @@ class RobotController:
             debug_print("Initializing calibration system...")
             calibration.initialize()
             
-            # 1. Initialize charging mode controller
-            debug_print("Initializing charging mode...")
-            self.charging_mode = charging_mode.initialize()
-            
-            # 2. Initialize LCD first for visual feedback
+            # 1. Initialize LCD first for visual feedback
             debug_print("Initializing LCD...")
             self.lcd_display = lcd_status.initialize()
             if self.lcd_display:
@@ -139,28 +127,6 @@ class RobotController:
         try:
             # Run main loop
             while self.running:
-                # Check for charging mode request (set via event callback)
-                if self._charging_mode_requested is not None:
-                    if self._charging_mode_requested:
-                        # Enter charging mode
-                        debug_print("Charging mode activated via controller!", force=True)
-                        self.charging_mode.enter_charging_mode(
-                            self.motor_controller,
-                            self.wifi_manager,
-                            self.underglow,
-                            self.lcd_display
-                        )
-                        # Monitor loop blocks until disabled
-                        self.charging_mode.monitor_loop(
-                            self.motor_controller,
-                            self.wifi_manager,
-                            self.underglow,
-                            self.lcd_display
-                        )
-                        # When it returns, robot will soft reset
-                    # Reset the flag
-                    self._charging_mode_requested = None
-                
                 # Check safety systems
                 if not self.safety_controller.check_safety():
                     debug_print("Safety check failed")
@@ -240,15 +206,6 @@ class RobotController:
             self.lcd_display.backlight_off()
         
         debug_print("Shutdown complete", force=True)
-    
-    def _on_charging_mode_requested(self, enable):
-        """
-        Event callback for charging mode requests.
-        
-        Args:
-            enable: True to enable charging mode, False to disable
-        """
-        self._charging_mode_requested = enable
 
 
 async def main():
