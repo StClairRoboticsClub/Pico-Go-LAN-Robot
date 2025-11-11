@@ -290,226 +290,318 @@ class LCDStatus:
             self.display.hline(x, y_pos + 2, line_width - 5, CYAN)
     
     def _draw_robot_icon(self):
-        """Draw a HUGE cool robot icon based on robot name - FULL SCREEN!"""
+        """Draw polished, intentional robot icon based on robot name - FULL SCREEN!"""
         center_x = 120
         center_y = 67
+        icon_start_y = 20  # Start below status bar
         
         # Get current robot name from config (supports dynamic profile changes)
         robot_name = config.ROBOT_NAME
+        import math
         
         if "THUNDER" in robot_name:
-            # Purple and black patterned background
-            for y in range(20, 135):
-                for x in range(0, 240, 3):
-                    if (x + y) % 8 < 4:
-                        self.display.pixel(x, y, MAGENTA)
-            
-            # ONE MASSIVE lightning bolt down the center - classic zigzag
-            bolt_points = [
-                (140, 20),   # Top right start
-                (110, 45),   # Zag left
-                (130, 50),   # Zig right
-                (100, 75),   # Zag left
-                (120, 80),   # Zig right
-                (90, 105),   # Zag left
-                (110, 110),  # Zig right
-                (80, 135)    # Bottom left end
+            # Clean lightning bolt design - represents thunder/lightning
+            # Lightning bolt - clean zigzag path (larger, more visible)
+            bolt_path = [
+                (180, icon_start_y + 10),   # Top
+                (140, icon_start_y + 35),   # First zag
+                (170, icon_start_y + 40),   # Zig back
+                (110, icon_start_y + 65),   # Second zag
+                (150, icon_start_y + 70),   # Zig back
+                (80, icon_start_y + 95),   # Third zag
+                (120, icon_start_y + 100)   # Bottom
             ]
             
-            # Draw THICK lightning bolt
-            for i in range(len(bolt_points) - 1):
-                x1, y1 = bolt_points[i]
-                x2, y2 = bolt_points[i + 1]
-                # Make it SUPER thick (20px wide)
-                for thickness in range(20):
-                    offset = thickness - 10
+            # Draw main bolt (thick, yellow - VERY VISIBLE)
+            for i in range(len(bolt_path) - 1):
+                x1, y1 = bolt_path[i]
+                x2, y2 = bolt_path[i + 1]
+                # Draw VERY thick line (12px wide)
+                for offset in range(-12, 13):
                     self.display.line(x1 + offset, y1, x2 + offset, y2, YELLOW)
             
-            # White core in the center of the bolt for brightness
-            for i in range(len(bolt_points) - 1):
-                x1, y1 = bolt_points[i]
-                x2, y2 = bolt_points[i + 1]
-                for thickness in range(6):
-                    offset = thickness - 3
+            # Bright white core
+            for i in range(len(bolt_path) - 1):
+                x1, y1 = bolt_path[i]
+                x2, y2 = bolt_path[i + 1]
+                for offset in range(-5, 6):
                     self.display.line(x1 + offset, y1, x2 + offset, y2, WHITE)
             
-            # Electric glow around the bolt
-            glow_points = [(140, 20), (110, 45), (100, 75), (90, 105), (80, 135)]
-            for x, y in glow_points:
-                # Radial glow
-                for dx in range(-15, 16, 3):
-                    for dy in range(-15, 16, 3):
-                        if dx*dx + dy*dy < 200:
-                            self.display.pixel(x + dx, y + dy, CYAN)
+            # Electric sparks around bolt (more visible)
+            spark_points = [(180, icon_start_y + 10), (140, icon_start_y + 35), (110, icon_start_y + 65), (80, icon_start_y + 95)]
+            for x, y in spark_points:
+                for angle in [0, 45, 90, 135, 180, 225, 270, 315]:
+                    rad = math.radians(angle)
+                    for dist in [10, 15, 20]:
+                        sx = int(x + dist * math.cos(rad))
+                        sy = int(y + dist * math.sin(rad))
+                        if 0 <= sx < 240 and icon_start_y <= sy < 135:
+                            self.display.pixel(sx, sy, CYAN)
+                            self.display.pixel(sx + 1, sy, CYAN)
+                            self.display.pixel(sx, sy + 1, CYAN)
             
-            # HUGE text at bottom
-            self.display.text("THUNDER", 70, 120, YELLOW)
-            self.display.text("THUNDER", 71, 120, YELLOW)
-            self.display.text("THUNDER", 70, 121, YELLOW)
-            self.display.text("THUNDER", 71, 121, YELLOW)
+            # Robot name at bottom (larger, bolder)
+            self.display.text("THUNDER", 70, 125, YELLOW)
+            self.display.text("THUNDER", 71, 125, YELLOW)
+            self.display.text("THUNDER", 70, 126, YELLOW)
+            self.display.text("THUNDER", 71, 126, YELLOW)
             
         elif "BLITZ" in robot_name:
-            # MASSIVE Speed lines - full screen width
+            # Speed lines representing blitz/fast movement (BOLD and VISIBLE)
+            # Parallel speed lines converging to right (motion effect)
             for i in range(10):
-                y_pos = 25 + i * 10
-                line_start = 10 + i * 5
-                line_width = 220 - i * 10
-                # Triple thick lines
-                for thickness in range(5):
-                    self.display.hline(line_start, y_pos + thickness, line_width, CYAN)
-                    self.display.hline(line_start + 5, y_pos + thickness + 3, line_width - 15, YELLOW)
+                y_start = icon_start_y + i * 10
+                x_start = 15 + i * 4
+                x_end = 225 - i * 6
+                # Draw thick converging lines (3px thick)
+                for thickness in range(3):
+                    self.display.line(x_start, y_start + thickness, x_end, y_start + thickness, YELLOW)
+                # Add motion blur effect
+                if i % 2 == 0:
+                    for thickness in range(2):
+                        self.display.line(x_start + 8, y_start + thickness, x_end + 8, y_start + thickness, CYAN)
             
-            # HUGE text
-            self.display.text("BLITZ", 85, 105, CYAN)
-            self.display.text("BLITZ", 86, 105, CYAN)
-            self.display.text("BLITZ", 85, 106, CYAN)
-            self.display.text("BLITZ", 86, 106, CYAN)
+            # Speed indicator arrows (larger)
+            for i in range(4):
+                arrow_x = 170 + i * 12
+                arrow_y = icon_start_y + 15 + i * 20
+                # Arrow pointing right (thick)
+                for thickness in range(3):
+                    self.display.line(arrow_x, arrow_y + thickness, arrow_x + 20, arrow_y + thickness, YELLOW)
+                # Arrow head
+                self.display.line(arrow_x + 20, arrow_y, arrow_x + 15, arrow_y - 5, YELLOW)
+                self.display.line(arrow_x + 20, arrow_y, arrow_x + 15, arrow_y + 5, YELLOW)
+                self.display.line(arrow_x + 15, arrow_y - 5, arrow_x + 15, arrow_y + 5, YELLOW)
+            
+            # Robot name at bottom (larger, bolder)
+            self.display.text("BLITZ", 90, 125, YELLOW)
+            self.display.text("BLITZ", 91, 125, YELLOW)
+            self.display.text("BLITZ", 90, 126, YELLOW)
+            self.display.text("BLITZ", 91, 126, YELLOW)
             
         elif "NITRO" in robot_name:
-            # MASSIVE Flame wall across screen
-            for i in range(12):
-                x_pos = 10 + i * 18
-                flame_height = 60 + (i % 3) * 15
-                # Draw tall flames
-                for y in range(25, 25 + flame_height, 3):
-                    flame_color = YELLOW if y < 45 else RED if y < 70 else MAGENTA
-                    width = 12 - ((y - 25) // 10)
-                    self.display.hline(x_pos - width//2, y, max(2, width), flame_color)
+            # Flames representing nitro/boost (BIG and BOLD)
+            # Draw realistic flame shapes (larger)
+            flame_bases = [(60, 120), (120, 120), (180, 120)]
+            for base_x, base_y in flame_bases:
+                # Each flame has multiple points (larger flames)
+                flame_points = [
+                    (base_x - 12, base_y),      # Left base
+                    (base_x - 6, base_y - 20), # Left middle
+                    (base_x, base_y - 50),      # Top left
+                    (base_x + 6, base_y - 30), # Top center
+                    (base_x + 12, base_y - 15), # Top right
+                    (base_x + 6, base_y - 8),  # Right middle
+                    (base_x + 12, base_y)       # Right base
+                ]
+                
+                # Draw flame outline (thick)
+                for i in range(len(flame_points) - 1):
+                    x1, y1 = flame_points[i]
+                    x2, y2 = flame_points[i + 1]
+                    for thickness in range(3):
+                        self.display.line(x1, y1 + thickness, x2, y2 + thickness, RED)
+                
+                # Fill flame with gradient (yellow at base, red at top) - thicker
+                for y in range(base_y - 50, base_y):
+                    width = 24 - abs((y - (base_y - 25)) // 2)
+                    color = YELLOW if y > base_y - 20 else RED
+                    for thickness in range(2):
+                        self.display.hline(base_x - width//2, y + thickness, width, color)
             
-            # HUGE text
-            self.display.text("NITRO", 85, 105, RED)
-            self.display.text("NITRO", 86, 105, RED)
-            self.display.text("NITRO", 85, 106, RED)
-            self.display.text("NITRO", 86, 106, RED)
+            # Robot name at bottom (larger, bolder)
+            self.display.text("NITRO", 85, 125, RED)
+            self.display.text("NITRO", 86, 125, RED)
+            self.display.text("NITRO", 85, 126, RED)
+            self.display.text("NITRO", 86, 126, RED)
             
         elif "TURBO" in robot_name:
-            # MASSIVE Spinning turbo pattern
-            for r in range(5, 55, 8):
-                self.display.ellipse(center_x, center_y, r, r, GREEN)
-                self.display.ellipse(center_x, center_y, r+1, r+1, GREEN)
-            # Radial spokes
-            for angle in range(0, 360, 30):
-                import math
-                x_end = int(center_x + 50 * math.cos(math.radians(angle)))
-                y_end = int(center_y + 50 * math.sin(math.radians(angle)))
-                self.display.line(center_x, center_y, x_end, y_end, CYAN)
+            # Spinning turbine/fan representing turbo (BIGGER)
+            turbo_center_y = icon_start_y + 50
+            # Draw turbine blades (fan design - thicker)
+            num_blades = 6
+            blade_length = 50
+            for blade in range(num_blades):
+                angle = (blade * 360 / num_blades) - 45  # Offset for better look
+                rad = math.radians(angle)
+                # Blade line (thick)
+                x_end = int(center_x + blade_length * math.cos(rad))
+                y_end = int(turbo_center_y + blade_length * math.sin(rad))
+                for thickness in range(4):
+                    self.display.line(center_x, turbo_center_y, x_end, y_end, GREEN)
+                # Blade tip (larger)
+                self.display.fill_rect(x_end - 3, y_end - 3, 6, 6, CYAN)
             
-            # HUGE text
-            self.display.text("TURBO", 85, 105, GREEN)
-            self.display.text("TURBO", 86, 105, GREEN)
-            self.display.text("TURBO", 85, 106, GREEN)
-            self.display.text("TURBO", 86, 106, GREEN)
+            # Center hub (filled circle - larger)
+            for r in range(12, 0, -1):
+                self.display.ellipse(center_x, turbo_center_y, r, r, GREEN)
+            # Inner black center
+            for r in range(7, 0, -1):
+                self.display.ellipse(center_x, turbo_center_y, r, r, BLACK)
+            
+            # Outer ring (thicker)
+            for r in range(blade_length + 5, blade_length + 2, -1):
+                self.display.ellipse(center_x, turbo_center_y, r, r, GREEN)
+            
+            # Robot name at bottom (larger, bolder)
+            self.display.text("TURBO", 85, 125, GREEN)
+            self.display.text("TURBO", 86, 125, GREEN)
+            self.display.text("TURBO", 85, 126, GREEN)
+            self.display.text("TURBO", 86, 126, GREEN)
             
         elif "SPEED" in robot_name:
-            # MASSIVE Arrow pattern - full screen
-            for i in range(8):
-                x_start = 10 + i * 10
-                y_center = 60 + (i % 2) * 10
-                arrow_len = 40
-                # Thick arrows
-                for thickness in range(6):
-                    self.display.line(x_start, y_center + thickness - 3, 
-                                    x_start + arrow_len, y_center - 20 + thickness - 3, CYAN)
-                    self.display.line(x_start, y_center + thickness - 3, 
-                                    x_start + arrow_len, y_center + 20 + thickness - 3, CYAN)
+            # Racing arrows representing speed (BIGGER and BOLDER)
+            # Multiple forward-pointing arrows (racing forward - larger)
+            arrow_positions = [
+                (25, icon_start_y + 20), (55, icon_start_y + 30), (85, icon_start_y + 25), 
+                (115, icon_start_y + 35), (145, icon_start_y + 25), (175, icon_start_y + 30), (205, icon_start_y + 28)
+            ]
             
-            # HUGE text
-            self.display.text("SPEED", 85, 105, CYAN)
-            self.display.text("SPEED", 86, 105, CYAN)
-            self.display.text("SPEED", 85, 106, CYAN)
-            self.display.text("SPEED", 86, 106, CYAN)
+            for x, y in arrow_positions:
+                # Arrow body (horizontal line - thick)
+                for thickness in range(4):
+                    self.display.hline(x, y + thickness, 30, WHITE)
+                # Arrow head (triangle - larger)
+                self.display.line(x + 30, y, x + 22, y - 7, WHITE)
+                self.display.line(x + 30, y, x + 22, y + 7, WHITE)
+                self.display.line(x + 22, y - 7, x + 22, y + 7, WHITE)
+                # Fill arrow head
+                for fill_y in range(y - 6, y + 7):
+                    self.display.hline(x + 22, fill_y, 8, WHITE)
+                # Motion trail (thicker)
+                for thickness in range(2):
+                    self.display.hline(x - 12, y + thickness, 10, CYAN)
+            
+            # Speed lines in background (thicker)
+            for i in range(8):
+                y_pos = icon_start_y + 5 + i * 12
+                for thickness in range(2):
+                    self.display.hline(10, y_pos + thickness, 220, CYAN)
+            
+            # Robot name at bottom (larger, bolder)
+            self.display.text("SPEED", 85, 125, WHITE)
+            self.display.text("SPEED", 86, 125, WHITE)
+            self.display.text("SPEED", 85, 126, WHITE)
+            self.display.text("SPEED", 86, 126, WHITE)
             
         elif "BOLT" in robot_name:
-            # MASSIVE Lightning bolt pattern - purple theme
-            # Purple background pattern
-            for y in range(20, 135):
-                for x in range(0, 240, 4):
-                    if (x + y) % 12 < 6:
-                        self.display.pixel(x, y, MAGENTA)
-            
-            # HUGE lightning bolt - similar to THUNDER but purple
-            bolt_points = [
-                (150, 20), (120, 50), (140, 55), (110, 80),
-                (130, 85), (100, 110), (120, 115), (90, 135)
+            # Lightning bolt design (different from THUNDER - more angular, BIGGER)
+            # Angular lightning bolt (more geometric, larger)
+            bolt_segments = [
+                (190, icon_start_y + 5),   # Top
+                (150, icon_start_y + 30),   # Down-left
+                (180, icon_start_y + 35),   # Right
+                (120, icon_start_y + 60),   # Down-left
+                (160, icon_start_y + 65),   # Right
+                (90, icon_start_y + 90),  # Down-left
+                (130, icon_start_y + 95)   # Bottom
             ]
-            # Draw thick purple bolt
-            for i in range(len(bolt_points) - 1):
-                x1, y1 = bolt_points[i]
-                x2, y2 = bolt_points[i + 1]
-                for thickness in range(18):
-                    offset = thickness - 9
-                    self.display.line(x1 + offset, y1, x2 + offset, y2, MAGENTA)
-            # White core
-            for i in range(len(bolt_points) - 1):
-                x1, y1 = bolt_points[i]
-                x2, y2 = bolt_points[i + 1]
-                for thickness in range(5):
-                    offset = thickness - 2
-                    self.display.line(x1 + offset, y1, x2 + offset, y2, WHITE)
             
-            # HUGE text
-            self.display.text("BOLT", 85, 105, MAGENTA)
-            self.display.text("BOLT", 86, 105, MAGENTA)
-            self.display.text("BOLT", 85, 106, MAGENTA)
-            self.display.text("BOLT", 86, 106, MAGENTA)
+            # Draw bolt with purple/blue theme (THICKER)
+            for i in range(len(bolt_segments) - 1):
+                x1, y1 = bolt_segments[i]
+                x2, y2 = bolt_segments[i + 1]
+                # Thick purple outline (10px wide)
+                for offset in range(-10, 11):
+                    self.display.line(x1 + offset, y1, x2 + offset, y2, MAGENTA)
+                # Blue core (thicker)
+                for offset in range(-4, 5):
+                    self.display.line(x1 + offset, y1, x2 + offset, y2, BLUE)
+            
+            # Energy sparks (more visible)
+            for x, y in [(190, icon_start_y + 5), (150, icon_start_y + 30), (120, icon_start_y + 60), (90, icon_start_y + 90)]:
+                for dx, dy in [(-6, -6), (6, -6), (-6, 6), (6, 6), (0, -10), (0, 10), (-10, 0), (10, 0)]:
+                    if 0 <= x + dx < 240 and icon_start_y <= y + dy < 135:
+                        self.display.pixel(x + dx, y + dy, CYAN)
+                        self.display.pixel(x + dx + 1, y + dy, CYAN)
+                        self.display.pixel(x + dx, y + dy + 1, CYAN)
+            
+            # Robot name at bottom (larger, bolder)
+            self.display.text("BOLT", 95, 125, MAGENTA)
+            self.display.text("BOLT", 96, 125, MAGENTA)
+            self.display.text("BOLT", 95, 126, MAGENTA)
+            self.display.text("BOLT", 96, 126, MAGENTA)
             
         elif "FLASH" in robot_name:
-            # MASSIVE Flash pattern - pink theme with burst effect
-            # Pink burst from center
+            # Camera flash burst representing flash (BIGGER)
+            flash_center_y = icon_start_y + 50
+            # Flash burst rays (radiating from center - thicker)
             for angle in range(0, 360, 15):
-                import math
-                for r in range(10, 60, 5):
-                    x_end = int(center_x + r * math.cos(math.radians(angle)))
-                    y_end = int(center_y + r * math.sin(math.radians(angle)))
-                    if 0 <= x_end < 240 and 0 <= y_end < 135:
-                        self.display.pixel(x_end, y_end, MAGENTA)
+                rad = math.radians(angle)
+                for dist in range(25, 75, 6):
+                    x = int(center_x + dist * math.cos(rad))
+                    y = int(flash_center_y + dist * math.sin(rad))
+                    if 0 <= x < 240 and icon_start_y <= y < 135:
+                        # Thicker rays
+                        self.display.pixel(x, y, WHITE)
+                        self.display.pixel(x + 1, y, WHITE)
+                        self.display.pixel(x, y + 1, WHITE)
+                        if dist < 55:
+                            self.display.pixel(x, y, YELLOW)
             
-            # Concentric circles
-            for r in range(10, 50, 8):
-                self.display.ellipse(center_x, center_y, r, r, MAGENTA)
+            # Concentric circles (flash effect - thicker)
+            for r in [18, 30, 42]:
+                for thickness in range(2):
+                    self.display.ellipse(center_x, flash_center_y, r + thickness, r + thickness, WHITE)
             
-            # HUGE text
-            self.display.text("FLASH", 80, 105, MAGENTA)
-            self.display.text("FLASH", 81, 105, MAGENTA)
-            self.display.text("FLASH", 80, 106, MAGENTA)
-            self.display.text("FLASH", 81, 106, MAGENTA)
+            # Bright center (filled circles - larger)
+            for r in range(15, 0, -1):
+                self.display.ellipse(center_x, flash_center_y, r, r, WHITE)
+            for r in range(10, 0, -1):
+                self.display.ellipse(center_x, flash_center_y, r, r, YELLOW)
+            
+            # Robot name at bottom (larger, bolder)
+            self.display.text("FLASH", 80, 125, WHITE)
+            self.display.text("FLASH", 81, 125, WHITE)
+            self.display.text("FLASH", 80, 126, WHITE)
+            self.display.text("FLASH", 81, 126, WHITE)
             
         elif "STORM" in robot_name:
-            # MASSIVE Storm pattern - blue theme with rain/clouds
-            # Blue storm clouds at top
-            for i in range(8):
-                cloud_x = 20 + i * 30
-                cloud_y = 15 + (i % 3) * 5
-                # Draw cloud puffs
-                for offset_x in range(-15, 16, 3):
-                    for offset_y in range(-8, 9, 2):
-                        if offset_x*offset_x + offset_y*offset_y < 100:
-                            self.display.pixel(cloud_x + offset_x, cloud_y + offset_y, BLUE)
+            # Storm clouds with lightning (BIGGER)
+            # Draw storm clouds (puffy shapes - larger)
+            cloud_positions = [(50, icon_start_y + 10), (120, icon_start_y + 5), (190, icon_start_y + 13)]
+            for cx, cy in cloud_positions:
+                # Cloud puff (larger)
+                for offset_x in range(-25, 26, 2):
+                    for offset_y in range(-10, 11, 1):
+                        dist = offset_x*offset_x + offset_y*offset_y*2
+                        if dist < 250:
+                            self.display.pixel(cx + offset_x, cy + offset_y, BLUE)
+                            self.display.pixel(cx + offset_x + 1, cy + offset_y, BLUE)
             
-            # Rain lines
-            for i in range(15):
-                x_pos = 15 + i * 15
-                for y in range(40, 135, 8):
-                    self.display.vline(x_pos, y, 6, CYAN)
+            # Rain drops (diagonal lines - thicker)
+            for i in range(18):
+                x = 15 + i * 12
+                for y in range(icon_start_y + 35, 135, 8):
+                    for thickness in range(3):
+                        self.display.vline(x, y + thickness, 5, CYAN)
+                    self.display.vline(x + 1, y + 1, 4, CYAN)
             
-            # Lightning strikes
-            for i in range(3):
-                strike_x = 60 + i * 60
-                self.display.vline(strike_x, 30, 50, YELLOW)
-                self.display.vline(strike_x + 1, 30, 50, YELLOW)
-                self.display.vline(strike_x - 1, 30, 50, YELLOW)
+            # Lightning strikes (thicker, more visible)
+            for strike_x in [70, 120, 170]:
+                # Zigzag lightning (thick)
+                for thickness in range(3):
+                    self.display.vline(strike_x + thickness, icon_start_y + 20, 18, YELLOW)
+                    self.display.vline(strike_x - 3 + thickness, icon_start_y + 35, 18, YELLOW)
+                    self.display.vline(strike_x + 3 + thickness, icon_start_y + 50, 23, YELLOW)
+                    self.display.vline(strike_x + thickness, icon_start_y + 70, 28, YELLOW)
+                # Bright core (thicker)
+                for thickness in range(2):
+                    self.display.vline(strike_x + thickness, icon_start_y + 20, 55, WHITE)
             
-            # HUGE text
-            self.display.text("STORM", 80, 105, BLUE)
-            self.display.text("STORM", 81, 105, BLUE)
-            self.display.text("STORM", 80, 106, BLUE)
-            self.display.text("STORM", 81, 106, BLUE)
+            # Robot name at bottom (larger, bolder)
+            self.display.text("STORM", 80, 125, BLUE)
+            self.display.text("STORM", 81, 125, BLUE)
+            self.display.text("STORM", 80, 126, BLUE)
+            self.display.text("STORM", 81, 126, BLUE)
         else:
-            # Generic HUGE robot
-            self.display.rect(center_x - 40, center_y - 40, 80, 80, WHITE)
-            self.display.fill_rect(center_x - 15, center_y - 15, 10, 10, GREEN)
-            self.display.fill_rect(center_x + 5, center_y - 15, 10, 10, GREEN)
-            self.display.text("RACER", 90, 105, WHITE)
+            # Generic robot icon
+            self.display.fill_rect(0, 0, 240, 135, BLACK)
+            # Simple robot shape
+            self.display.rect(center_x - 30, center_y - 30, 60, 60, WHITE)
+            self.display.fill_rect(center_x - 12, center_y - 12, 8, 8, GREEN)
+            self.display.fill_rect(center_x + 4, center_y - 12, 8, 8, GREEN)
+            self.display.text("RACER", 90, 120, WHITE)
     
     def _draw_racing_header(self, state_text="", color=WHITE):
         """Draw consistent racing-style header with robot name on all screens."""
