@@ -350,12 +350,12 @@ def prompt_for_robot_ip() -> str:
             print(f"   ❌ Error: {e}")
 
 
-def discover_and_select_robot() -> str:
+def discover_and_select_robot() -> tuple:
     """
     Discover robots on network and let user select one.
     
     Returns:
-        Robot IP address or None
+        (robot_ip, robot_id) tuple or (None, None) if no robot selected
     """
     print("🔍 Discovering robots...", end='', flush=True)
     
@@ -370,15 +370,16 @@ def discover_and_select_robot() -> str:
         print("   Troubleshooting: Check robot power, WiFi, and network connection")
         manual = input("   Enter IP manually? (y/n): ").strip().lower()
         if manual == 'y':
-            return prompt_for_robot_ip()
-        return None
+            robot_ip = prompt_for_robot_ip()
+            return (robot_ip, None) if robot_ip else (None, None)
+        return (None, None)
     
     elif len(robots) == 1:
         # Exactly one robot found - auto-select
         robot = robots[0]
         print(f"✅ Robot #{robot['robot_id']} ({robot['hostname']}) at {robot['ip']}")
         save_cached_robot(robot['ip'])
-        return robot['ip']
+        return (robot['ip'], robot['robot_id'])
     
     else:
         # Multiple robots found - let user choose
@@ -391,13 +392,13 @@ def discover_and_select_robot() -> str:
                 choice = input(f"\nSelect (1-{len(robots)}) or 'q': ").strip()
                 
                 if choice.lower() == 'q':
-                    return None
+                    return (None, None)
                 
                 idx = int(choice) - 1
                 if 0 <= idx < len(robots):
                     robot = robots[idx]
                     save_cached_robot(robot['ip'])
-                    return robot['ip']
+                    return (robot['ip'], robot['robot_id'])
                 else:
                     print(f"❌ Enter 1-{len(robots)}")
             
@@ -405,7 +406,7 @@ def discover_and_select_robot() -> str:
                 print("❌ Invalid input")
             except KeyboardInterrupt:
                 print("\n❌ Cancelled")
-                return None
+                return (None, None)
 
 
 def select_robot(robots: List[Dict]) -> str:
@@ -561,31 +562,32 @@ def apply_expo(value: float, expo: float = 2.0) -> float:
 
 
 # ============================================================================
-# CONTROLLER INPUT HANDLERS
+# UNIFIED DISPLAY CONTROLLER
 # ============================================================================
 
-class KeyboardController:
+class DisplayController:
     """
-    Enhanced keyboard input handler with improved pygame window.
-    Modern UI with visual feedback and better layout.
+    Unified pygame display window for all controller types.
+    Shows debug info, control status, and Hz.
     """
     
     def __init__(self):
-        """Initialize keyboard controller with improved pygame window."""
+        """Initialize pygame display window."""
         pygame.init()
         
         # Window configuration
-        self.window_width = 600
-        self.window_height = 500
+        self.window_width = 700
+        self.window_height = 600
         self.bg_color = (20, 20, 30)  # Dark blue-gray
         self.accent_color = (100, 200, 255)  # Light blue
         self.text_color = (255, 255, 255)  # White
         self.success_color = (100, 255, 100)  # Green
         self.warning_color = (255, 200, 100)  # Orange
+        self.error_color = (255, 100, 100)  # Red
         
         # Create window
         self.screen = pygame.display.set_mode((self.window_width, self.window_height))
-        pygame.display.set_caption("🤖 Pico-Go LAN Robot - Keyboard Controller")
+        pygame.display.set_caption("🤖 Pico-Go LAN Robot Controller")
         
         # Set up fonts
         pygame.font.init()
@@ -593,28 +595,47 @@ class KeyboardController:
         self.header_font = pygame.font.Font(None, 24)
         self.body_font = pygame.font.Font(None, 20)
         self.value_font = pygame.font.Font(None, 32)
+        self.small_font = pygame.font.Font(None, 18)
         
-        self.connected = True
-        
-        # Current state
+        # Display state
+        self.robot_ip = "Not connected"
+        self.robot_id = None
+        self.controller_type = "Unknown"
         self.throttle = 0.0
         self.steer = 0.0
-        
-        # Control parameters - tuned for responsiveness
-        self.throttle_step = 0.15  # Throttle change per frame (increased for faster response)
-        self.steer_step = 0.20     # Steering change per frame (increased for faster response)
-        self.throttle_decay = 0.85  # Throttle decay when no input (faster decay)
-        self.steer_decay = 0.80     # Steering decay when no input (faster decay)
-        
-        # UI update throttling (don't redraw every frame)
-        self.ui_update_counter = 0
-        self.ui_update_interval = 3  # Update UI every 3 frames (10 Hz instead of 30 Hz)
+        self.current_hz = 0.0
+        self.packets_sent = 0
+        self.runtime = 0.0
+        self.connected = False
         
         # Initial render
         self._draw_ui()
     
+    def update(self, robot_ip=None, robot_id=None, controller_type=None, 
+               throttle=None, steer=None, hz=None, packets_sent=None, 
+               runtime=None, connected=None):
+        """Update display state."""
+        if robot_ip is not None:
+            self.robot_ip = robot_ip
+        if robot_id is not None:
+            self.robot_id = robot_id
+        if controller_type is not None:
+            self.controller_type = controller_type
+        if throttle is not None:
+            self.throttle = throttle
+        if steer is not None:
+            self.steer = steer
+        if hz is not None:
+            self.current_hz = hz
+        if packets_sent is not None:
+            self.packets_sent = packets_sent
+        if runtime is not None:
+            self.runtime = runtime
+        if connected is not None:
+            self.connected = connected
+    
     def _draw_ui(self):
-        """Draw improved UI in the pygame window."""
+        """Draw the UI in the pygame window."""
         # Clear screen
         self.screen.fill(self.bg_color)
         
@@ -623,22 +644,56 @@ class KeyboardController:
         pygame.draw.rect(self.screen, (30, 30, 45), title_rect)
         title_text = self.title_font.render("🤖 Pico-Go LAN Robot", True, self.accent_color)
         self.screen.blit(title_text, (20, 12))
-        subtitle_text = self.body_font.render("Keyboard Controller", True, (200, 200, 200))
+        subtitle_text = self.body_font.render("Controller", True, (200, 200, 200))
         self.screen.blit(subtitle_text, (20, 35))
         
         y = 70
+        
+        # Connection status
+        status_header = self.header_font.render("Connection", True, self.accent_color)
+        self.screen.blit(status_header, (20, y))
+        y += 30
+        
+        # Connection status indicator
+        status_color = self.success_color if self.connected else self.error_color
+        status_text = "Connected" if self.connected else "Disconnected"
+        status_label = self.body_font.render(f"Status: {status_text}", True, status_color)
+        self.screen.blit(status_label, (40, y))
+        y += 25
+        
+        # Robot info
+        robot_info = f"Robot: {self.robot_ip}"
+        if self.robot_id:
+            robot_info = f"Robot #{self.robot_id}: {self.robot_ip}"
+        robot_text = self.body_font.render(robot_info, True, self.text_color)
+        self.screen.blit(robot_text, (40, y))
+        y += 25
+        
+        # Controller type
+        ctrl_text = self.body_font.render(f"Controller: {self.controller_type}", True, self.text_color)
+        self.screen.blit(ctrl_text, (40, y))
+        y += 40
         
         # Controls section
         controls_header = self.header_font.render("Controls", True, self.accent_color)
         self.screen.blit(controls_header, (20, y))
         y += 30
         
-        controls = [
-            ("W / S", "Throttle forward/reverse"),
-            ("A / D", "Steer left/right"),
-            ("SPACE", "Brake (rapid stop)"),
-            ("ESC", "Exit")
-        ]
+        if self.controller_type == "Keyboard":
+            controls = [
+                ("W / S", "Throttle forward/reverse"),
+                ("A / D", "Steer left/right"),
+                ("SPACE", "Brake (rapid stop)"),
+                ("ESC", "Exit")
+            ]
+        else:
+            controls = [
+                ("RT", "Forward throttle"),
+                ("LT", "Reverse throttle"),
+                ("LS X", "Steering"),
+                ("START", "Exit"),
+                ("BACK+START", "Charging mode")
+            ]
         
         for key, desc in controls:
             key_text = self.body_font.render(key, True, self.warning_color)
@@ -661,29 +716,26 @@ class KeyboardController:
         # Throttle bar
         bar_width = 300
         bar_height = 30
-        bar_x = 120
+        bar_x = 150
         bar_y = y - 5
         
         # Background bar
         pygame.draw.rect(self.screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
         
         # Throttle value bar (green for forward, red for reverse)
-        # Starts at center, extends right for forward, left for reverse
-        throttle_width = int(abs(self.throttle) * bar_width / 2)  # Half width since it extends from center
+        throttle_width = int(abs(self.throttle) * bar_width / 2)
         if self.throttle > 0:
             bar_color = self.success_color  # Green for forward
         elif self.throttle < 0:
-            bar_color = (255, 100, 100)  # Red for reverse
+            bar_color = self.error_color  # Red for reverse
         else:
             bar_color = (60, 60, 60)  # Gray for neutral
         
         if throttle_width > 0:
             center_x = bar_x + bar_width // 2
             if self.throttle > 0:
-                # Forward: extend right from center
                 pygame.draw.rect(self.screen, bar_color, (center_x, bar_y, throttle_width, bar_height))
             else:
-                # Reverse: extend left from center
                 pygame.draw.rect(self.screen, bar_color, (center_x - throttle_width, bar_y, throttle_width, bar_height))
         
         # Center line
@@ -709,13 +761,10 @@ class KeyboardController:
         # Steering value bar (blue)
         steer_width = int(abs(self.steer) * bar_width)
         if steer_width > 0:
-            steer_x = bar_x + (bar_width // 2) - (steer_width // 2)
             if self.steer > 0:
-                # Right turn
                 pygame.draw.rect(self.screen, self.accent_color, 
                                (bar_x + bar_width // 2, bar_y, steer_width // 2, bar_height))
             else:
-                # Left turn
                 pygame.draw.rect(self.screen, self.accent_color, 
                                (bar_x + bar_width // 2 - steer_width // 2, bar_y, steer_width // 2, bar_height))
         
@@ -729,11 +778,88 @@ class KeyboardController:
         
         y += 60
         
+        # Statistics section
+        stats_header = self.header_font.render("Statistics", True, self.accent_color)
+        self.screen.blit(stats_header, (20, y))
+        y += 30
+        
+        # Control rate display
+        rate_label = self.body_font.render("Control Rate:", True, self.text_color)
+        self.screen.blit(rate_label, (40, y))
+        
+        # Color code Hz: green if >= 28, yellow if >= 25, red if < 25
+        if self.current_hz >= 28.0:
+            hz_color = self.success_color  # Green
+        elif self.current_hz >= 25.0:
+            hz_color = self.warning_color  # Yellow
+        else:
+            hz_color = self.error_color  # Red
+        
+        hz_text = self.value_font.render(f"{self.current_hz:.1f} Hz", True, hz_color)
+        self.screen.blit(hz_text, (150, y - 2))
+        y += 35
+        
+        # Packets sent
+        packets_label = self.body_font.render("Packets Sent:", True, self.text_color)
+        self.screen.blit(packets_label, (40, y))
+        packets_text = self.value_font.render(f"{self.packets_sent}", True, self.text_color)
+        self.screen.blit(packets_text, (150, y - 2))
+        y += 35
+        
+        # Runtime
+        runtime_label = self.body_font.render("Runtime:", True, self.text_color)
+        self.screen.blit(runtime_label, (40, y))
+        runtime_text = self.value_font.render(f"{self.runtime:.1f}s", True, self.text_color)
+        self.screen.blit(runtime_text, (150, y - 2))
+        y += 40
+        
         # Instructions
-        info_text = self.body_font.render("Keep this window focused to control the robot", True, (150, 150, 150))
+        info_text = self.small_font.render("Keep this window focused to control the robot", True, (150, 150, 150))
         self.screen.blit(info_text, (20, y))
+        y += 20
+        info_text2 = self.small_font.render("Terminal: Type 'profile' to configure robot", True, (150, 150, 150))
+        self.screen.blit(info_text2, (20, y))
         
         pygame.display.flip()
+    
+    def process_events(self):
+        """Process pygame events. Returns True if window should close."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return True
+        return False
+    
+    def cleanup(self):
+        """Cleanup pygame resources."""
+        pygame.quit()
+
+
+# ============================================================================
+# CONTROLLER INPUT HANDLERS
+# ============================================================================
+
+class KeyboardController:
+    """
+    Keyboard input handler (display handled by DisplayController).
+    """
+    
+    def __init__(self):
+        """Initialize keyboard controller."""
+        # Ensure pygame is initialized (for keyboard input)
+        if not pygame.get_init():
+            pygame.init()
+        
+        self.connected = True
+        
+        # Current state
+        self.throttle = 0.0
+        self.steer = 0.0
+        
+        # Control parameters - tuned for responsiveness
+        self.throttle_step = 0.15  # Throttle change per frame (increased for faster response)
+        self.steer_step = 0.20     # Steering change per frame (increased for faster response)
+        self.throttle_decay = 0.85  # Throttle decay when no input (faster decay)
+        self.steer_decay = 0.80     # Steering decay when no input (faster decay)
     
     def get_axes(self, steering_trim: float = 0.0) -> tuple[float, float]:
         """
@@ -748,11 +874,8 @@ class KeyboardController:
         if not self.connected:
             return 0.0, 0.0
         
-        # Process pygame events (required for window to stay responsive)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.connected = False
-                return 0.0, 0.0
+        # Process pygame events (required for input)
+        pygame.event.pump()
         
         # Get current keyboard state
         keys = pygame.key.get_pressed()
@@ -782,12 +905,6 @@ class KeyboardController:
             if abs(self.steer) < 0.01:
                 self.steer = 0.0
         
-        # Update UI only every N frames (reduces lag)
-        self.ui_update_counter += 1
-        if self.ui_update_counter >= self.ui_update_interval:
-            self._draw_ui()
-            self.ui_update_counter = 0
-        
         # Apply steering trim when there's throttle
         steer_output = self.steer
         if abs(self.throttle) > 0.05:
@@ -812,11 +929,7 @@ class KeyboardController:
         if not self.connected:
             return False
         
-        # Process events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return True
-        
+        pygame.event.pump()
         keys = pygame.key.get_pressed()
         return keys[pygame.K_ESCAPE]
     
@@ -826,7 +939,8 @@ class KeyboardController:
     
     def cleanup(self):
         """Cleanup pygame resources."""
-        pygame.quit()
+        # Don't quit pygame here - DisplayController will handle it
+        pass
 
 
 class XboxController:
@@ -1184,6 +1298,9 @@ class ControllerApp:
         """
         self.robot_ip = robot_ip
         
+        # Always create display window
+        self.display = DisplayController()
+        
         # Try Xbox controller first, fall back to keyboard
         self.controller = XboxController()
         self.controller_type = "Xbox"
@@ -1192,40 +1309,289 @@ class ControllerApp:
             self.controller = KeyboardController()
             self.controller_type = "Keyboard"
         
+        # Update display with controller type
+        self.display.update(controller_type=self.controller_type, robot_ip=robot_ip)
+        
         self.connection = RobotConnection(robot_ip, ROBOT_PORT)
         self.running = False
         self.control_rate = 1.0 / CONTROL_RATE_HZ
+        self.robot_id = None  # Will be set from discovery
         
         # Statistics
         self.packets_sent = 0
         self.start_time = time.time()
         self.robot_calibration = None  # Will be set from discovery or connection
+        
+        # Hz tracking (rolling average over last 10 packets)
+        self.hz_history = []
+        self.hz_history_size = 10
+        self.last_send_time = None
+        
+        # Terminal command handling
+        self.command_queue = asyncio.Queue()
+    
+    def _get_profiles(self):
+        """Get robot profiles dictionary."""
+        return {
+            1: {"name": "THUNDER", "color": [255, 140, 0]},   # Orange
+            2: {"name": "BLITZ", "color": [0, 255, 255]},     # Cyan
+            3: {"name": "NITRO", "color": [255, 0, 0]},       # Red
+            4: {"name": "TURBO", "color": [0, 255, 0]},       # Green
+            5: {"name": "SPEED", "color": [255, 255, 0]},     # Yellow
+            6: {"name": "BOLT", "color": [138, 43, 226]},     # Purple
+            7: {"name": "FLASH", "color": [255, 20, 147]},    # Pink
+            8: {"name": "STORM", "color": [0, 191, 255]}      # Blue
+        }
+    
+    def _show_boot_messages(self):
+        """Show boot messages with profile information."""
+        profiles = self._get_profiles()
+        
+        if self.robot_id:
+            current_profile = profiles.get(self.robot_id, {"name": f"ROBOT-{self.robot_id}", "color": [255, 255, 255]})
+            print(f"\nRobot #{self.robot_id} ({current_profile['name']}) at {self.robot_ip}")
+        else:
+            print(f"\nRobot at {self.robot_ip}")
+        
+        print("Profiles: " + ", ".join([f"{p['name']}" for p in profiles.values()]))
+        print("Commands: profile \"NAME\" | help | quit")
+        print()
+    
+    async def _handle_terminal_commands(self):
+        """Background task to handle terminal commands."""
+        import sys
+        import threading
+        import queue as thread_queue
+        
+        # Use a thread-safe queue for commands from stdin thread
+        input_queue = thread_queue.Queue()
+        
+        # Use a thread to read stdin (blocking readline works in a thread)
+        def read_stdin():
+            import sys
+            # Make stdin unbuffered for immediate reading
+            try:
+                sys.stdin.reconfigure(encoding='utf-8', errors='replace')
+            except:
+                pass
+            
+            while self.running:
+                try:
+                    if sys.stdin.isatty() and not sys.stdin.closed:
+                        # Blocking readline() - waits for user to press Enter
+                        # This works in a separate thread
+                        line = sys.stdin.readline()
+                        if line:
+                            line = line.strip()
+                            if line:
+                                # Put in thread queue immediately
+                                input_queue.put(line)
+                                # Flush to ensure it's processed
+                                sys.stdout.flush()
+                    else:
+                        # Not a TTY or closed - wait a bit
+                        time.sleep(0.1)
+                except (EOFError, KeyboardInterrupt, BrokenPipeError):
+                    break
+                except Exception as e:
+                    # Only print errors to stderr (won't interfere with commands)
+                    print(f"ERROR in stdin thread: {e}", file=sys.stderr)
+                    time.sleep(0.1)
+        
+        # Start stdin reader thread
+        thread = threading.Thread(target=read_stdin, daemon=True)
+        thread.start()
+        
+        # Give thread a moment to start
+        await asyncio.sleep(0.1)
+        
+        # Process commands from thread queue
+        while self.running:
+            try:
+                # Check thread queue (non-blocking)
+                try:
+                    command = input_queue.get_nowait()
+                    # Process command immediately
+                    sys.stdout.flush()  # Ensure output is flushed
+                    await self._process_command(command)
+                    sys.stdout.flush()  # Ensure response is flushed
+                except thread_queue.Empty:
+                    pass
+            except Exception as e:
+                # Debug: print error (but don't spam)
+                import traceback
+                print(f"ERROR processing command: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+            await asyncio.sleep(0.05)  # Check more frequently
+    
+    async def _process_command(self, command: str):
+        """Process a terminal command."""
+        import sys
+        cmd = command.strip()
+        cmd_lower = cmd.lower()
+        
+        # Debug: confirm command received (remove after testing)
+        # print(f"DEBUG: Processing command: {cmd}", file=sys.stderr)
+        
+        # Ensure we can print (flush stdout)
+        sys.stdout.flush()
+        
+        if cmd_lower == 'profile' or cmd_lower.startswith('profile '):
+            # Parse profile command: profile "PROFILE_NAME" or profile PROFILE_NAME
+            profile_name = None
+            if cmd_lower.startswith('profile '):
+                # Extract profile name (handle quotes or no quotes)
+                rest = cmd[8:].strip()  # Skip "profile "
+                if rest.startswith('"') and rest.endswith('"'):
+                    profile_name = rest[1:-1].strip()
+                elif rest.startswith("'") and rest.endswith("'"):
+                    profile_name = rest[1:-1].strip()
+                else:
+                    # No quotes - use the whole rest as profile name
+                    profile_name = rest.strip()
+            
+            if profile_name:
+                # Change to specific profile by name
+                profiles = self._get_profiles()
+                profile_id = None
+                for rid, profile in profiles.items():
+                    if profile['name'].upper() == profile_name.upper():
+                        profile_id = rid
+                        break
+                
+                if profile_id and self.robot_id:
+                    # Send profile configuration directly via UDP
+                    # Use robot's ID, but profile's name and color
+                    # Use uppercase profile name to match firmware expectations
+                    profile_name_upper = profile_name.upper()
+                    success, message = await self._send_profile_config(self.robot_id, profile_name_upper, profiles[profile_id]['color'])
+                    if success:
+                        print(f"✅ Changed to profile: {profile_name_upper}")
+                    else:
+                        print(f"❌ Failed to change profile: {message}")
+                elif not self.robot_id:
+                    print("❌ Robot ID unknown - cannot change profile")
+                else:
+                    print(f"❌ Unknown profile: {profile_name}")
+                    print(f"Available: {', '.join([p['name'] for p in profiles.values()])}")
+            else:
+                # Interactive profile selection
+                print("Usage: profile \"PROFILE_NAME\"")
+                profiles = self._get_profiles()
+                print("Available profiles:")
+                for rid, profile in profiles.items():
+                    print(f"  {profile['name']}")
+        elif cmd_lower == 'help' or cmd_lower == '?':
+            profiles = self._get_profiles()
+            print("\nCommands:")
+            print("  profile \"NAME\"  - Change robot profile (e.g., profile \"BLITZ\")")
+            print("  help            - Show this help")
+            print("  quit            - Exit controller")
+            print(f"\nProfiles: {', '.join([p['name'] for p in profiles.values()])}")
+        elif cmd_lower == 'quit' or cmd_lower == 'exit':
+            self.running = False
+        else:
+            print(f"Unknown command: {cmd}")
+            print("Type 'help' for available commands")
+    
+    async def _send_profile_config(self, robot_id: int, name: str, color: list) -> tuple[bool, str]:
+        """Send profile configuration to robot via UDP.
+        
+        Returns:
+            (success: bool, message: str) tuple
+        """
+        import socket
+        
+        # Try up to 3 times with increasing timeout
+        for attempt in range(3):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                # Increase timeout on retries
+                timeout = 3.0 + (attempt * 1.0)  # 3s, 4s, 5s
+                sock.settimeout(timeout)
+                
+                packet = {
+                    "cmd": "set_profile",
+                    "seq": 0,
+                    "ts": int(time.time() * 1000),
+                    "robot_id": robot_id,
+                    "name": name,
+                    "color": color
+                }
+                
+                message = json.dumps(packet).encode()
+                sock.sendto(message, (self.robot_ip, ROBOT_PORT))
+                
+                # Wait for response with longer timeout
+                try:
+                    data, _ = sock.recvfrom(4096)
+                    response = json.loads(data.decode().strip())
+                    
+                    if response.get("type") == "profile_response":
+                        if response.get("success"):
+                            sock.close()
+                            return True, response.get("message", "Profile updated")
+                        else:
+                            # Return error message from robot
+                            error_msg = response.get("message", "Unknown error")
+                            sock.close()
+                            return False, error_msg
+                    else:
+                        sock.close()
+                        return False, f"Unexpected response type: {response.get('type')}"
+                except socket.timeout:
+                    sock.close()
+                    if attempt < 2:  # Retry if not last attempt
+                        await asyncio.sleep(0.5)
+                        continue
+                    return False, "No response from robot (timeout after retries)"
+                except json.JSONDecodeError as e:
+                    sock.close()
+                    return False, f"Invalid response from robot: {e}"
+            except Exception as e:
+                try:
+                    sock.close()
+                except:
+                    pass
+                if attempt < 2:
+                    await asyncio.sleep(0.5)
+                    continue
+                return False, f"Error sending profile: {e}"
+        
+        return False, "Failed after multiple attempts"
     
     async def run(self):
         """Run the controller application."""
         self.running = True
         
-        # Connect to robot
-        print("🔌 Connecting...", end='', flush=True)
+        # Connect to robot (silent - status shown in pygame window)
         while self.running and not self.connection.connected:
             if not await self.connection.connect():
-                print(f"\r⏳ Retrying...", end='', flush=True)
                 await asyncio.sleep(RECONNECT_DELAY)
         
         if not self.running:
             return
         
-        if self.controller_type == "Keyboard":
-            # Keyboard controller uses pygame window, just print simple message
-            print(f"\r{' ' * 50}\r✅ Connected to {self.robot_ip}", flush=True)
-            print("⌨️  Controls: W/S=Throttle, A/D=Steer, SPACE=Brake, ESC=Exit")
-        else:
-            print(f"\r{' ' * 50}\r✅ Connected to {self.robot_ip}", flush=True)
-            print("🎮 Controls: RT=Forward, LT=Reverse, LS=Steer, START=Exit")
+        # Update display with connection info (all status in pygame window)
+        self.display.update(
+            robot_ip=self.robot_ip,
+            robot_id=self.robot_id,
+            connected=True
+        )
+        
+        # Show profile information and commands on boot
+        self._show_boot_messages()
+        
+        # Start terminal command handler
+        command_task = asyncio.create_task(self._handle_terminal_commands())
+        # Keep reference to prevent garbage collection
+        self._command_task = command_task
         
         # Main control loop
-        last_update = time.time()
+        next_update_time = time.time()
+        self.last_send_time = None  # Initialize for Hz tracking
         charging_mode_active = False
+        display_update_counter = 0
 
         # --- Button arming: require all relevant buttons to be released before accepting input ---
         start_armed = False
@@ -1245,13 +1611,16 @@ class ControllerApp:
         
         try:
             while self.running:
+                # Check for display window close
+                if self.display.process_events():
+                    break
+                
                 # Check for charging mode combo (BACK + START for Xbox)
                 if self.controller_type == "Xbox":
                     if self.controller.check_charging_combo():
                         charging_mode_active = not charging_mode_active
-                        mode_str = "ENABLED" if charging_mode_active else "DISABLED"
-                        print(f"\n🔋 Charging mode {mode_str}")
                         await self.connection.send_charging_command(charging_mode_active)
+                        # Status shown in pygame window, no terminal output
                         continue
                 
                 # Check for exit button (START only, not combo)
@@ -1265,11 +1634,10 @@ class ControllerApp:
                     if self.controller.get_button(BUTTON_START):
                         break
                 
-                # Rate limiting
+                # Rate limiting with precise timing
                 now = time.time()
-                elapsed = now - last_update
                 
-                if elapsed >= self.control_rate:
+                if now >= next_update_time:
                     # Get controller input
                     throttle, steer = self.controller.get_axes()
                     
@@ -1277,23 +1645,63 @@ class ControllerApp:
                     if await self.connection.send_drive_command(throttle, steer):
                         self.packets_sent += 1
                         
-                        # Print status (overwrites same line)
-                        if self.packets_sent % 30 == 0:
-                            runtime = time.time() - self.start_time
-                            rate = self.packets_sent / runtime if runtime > 0 else 0
-                            print(f"\r📊 {self.packets_sent} pkts | {rate:.1f} Hz | T:{throttle:+.2f} S:{steer:+.2f}", end='', flush=True)
+                        # Track Hz (rolling average) - same calculation for terminal and display
+                        if self.last_send_time is not None:
+                            dt = now - self.last_send_time
+                            if dt > 0:
+                                current_hz = 1.0 / dt
+                                self.hz_history.append(current_hz)
+                                if len(self.hz_history) > self.hz_history_size:
+                                    self.hz_history.pop(0)
+                                
+                                # Calculate average Hz (same for both displays)
+                                avg_hz = sum(self.hz_history) / len(self.hz_history) if self.hz_history else 0.0
+                                
+                                # Update display
+                                runtime = now - self.start_time
+                                self.display.update(
+                                    throttle=throttle,
+                                    steer=steer,
+                                    hz=avg_hz,
+                                    packets_sent=self.packets_sent,
+                                    runtime=runtime,
+                                    connected=True
+                                )
+                                
+                                # Terminal status removed - all info shown in pygame window
+                                # This prevents interference with terminal input for commands
+                        
+                        self.last_send_time = now
                     else:
                         # Connection lost - try to reconnect
-                        print("\r⚠️  Reconnecting...", end='', flush=True)
+                        self.display.update(connected=False)
+                        # Only print error to terminal, status shown in pygame window
+                        print("⚠️  ERROR: Connection lost - Reconnecting...")
                         if not await self.connection.connect():
                             await asyncio.sleep(RECONNECT_DELAY)
                             continue
-                        print(f"\r{' ' * 50}\r", end='', flush=True)  # Clear reconnect message
+                        self.display.update(connected=True)
+                        # Reconnection success shown in pygame window
                     
-                    last_update = now
+                    # Schedule next update precisely
+                    next_update_time += self.control_rate
+                    # If we're behind, catch up gradually
+                    if next_update_time < now:
+                        next_update_time = now + self.control_rate
                 
-                # Small sleep to prevent CPU spinning
-                await asyncio.sleep(0.001)
+                # Update display periodically (every 2 frames = 15 Hz)
+                display_update_counter += 1
+                if display_update_counter >= 2:
+                    self.display._draw_ui()
+                    display_update_counter = 0
+                
+                # Sleep only if we're ahead of schedule (prevents busy-waiting)
+                sleep_time = next_update_time - time.time()
+                if sleep_time > 0.0001:  # Only sleep if more than 0.1ms
+                    await asyncio.sleep(min(sleep_time, 0.01))  # Cap at 10ms
+                else:
+                    # Very small yield to prevent CPU spinning
+                    await asyncio.sleep(0.0001)
         
         except KeyboardInterrupt:
             pass  # Silent interrupt
@@ -1314,27 +1722,59 @@ class ControllerApp:
         # Disconnect
         await self.connection.disconnect()
         
-        # Cleanup controllers
-        if self.controller_type == "Keyboard":
-            self.controller.cleanup()
-        elif self.controller_type == "Xbox":
-            pygame.quit()
+        # Cleanup display
+        self.display.cleanup()
         
-        # Brief statistics
-        runtime = time.time() - self.start_time
-        avg_rate = self.packets_sent / runtime if runtime > 0 else 0
-        print(f"\n📊 {self.packets_sent} pkts in {runtime:.1f}s ({avg_rate:.1f} Hz avg)")
+        # Statistics shown in pygame window, no terminal output
 
 
 # ============================================================================
 # ENTRY POINT
 # ============================================================================
 
+def print_usage():
+    """Print usage information."""
+    print("🤖 Pico-Go LAN Robot Controller")
+    print()
+    print("Usage:")
+    print("  python3 controller_xbox.py                    # Auto-discover and connect")
+    print("  python3 controller_xbox.py [robot_ip]          # Connect to specific robot")
+    print("  python3 controller_xbox.py --configure         # Configure robot profile")
+    print("  python3 controller_xbox.py --help              # Show this help")
+    print()
+    print("💡 To change robot profile (name/color):")
+    print("   python3 configure_robot.py [robot_id] [robot_ip]")
+    print("   Example: python3 configure_robot.py 1 192.168.8.230")
+    print()
+    print("   Or use: python3 controller_xbox.py --configure")
+    print()
+
+
 def main():
     """Main entry point."""
+    # Check for help
+    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+        print_usage()
+        sys.exit(0)
+    
     print("🤖 Pico-Go LAN Robot Controller")
     
     robot_ip = None
+    robot_id = None  # Track robot ID for profile instructions
+    
+    # Check for profile configuration command
+    if len(sys.argv) > 1 and sys.argv[1] in ['--configure', '-c', 'configure']:
+        # Run profile configuration tool
+        import subprocess
+        import os
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_script = os.path.join(script_dir, 'configure_robot.py')
+        if os.path.exists(config_script):
+            # Pass remaining arguments to configure_robot.py
+            subprocess.run([sys.executable, config_script] + sys.argv[2:])
+        else:
+            print("❌ configure_robot.py not found")
+        sys.exit(0)
     
     # Check if IP provided as command-line argument
     if len(sys.argv) > 1:
@@ -1343,9 +1783,15 @@ def main():
         robot_ip = resolve_robot_address(robot_address)
         if robot_ip:
             save_cached_robot(robot_ip)
+            # Try to discover robot_id from this IP
+            robots = discover_robots_on_network(timeout=1.0)
+            for robot in robots:
+                if robot['ip'] == robot_ip:
+                    robot_id = robot['robot_id']
+                    break
     else:
         # Auto mode: Always run discovery (don't blindly trust cache)
-        robot_ip = discover_and_select_robot()
+        robot_ip, robot_id = discover_and_select_robot()
     
     if robot_ip is None:
         print("❌ No robot selected. Exiting.")
@@ -1353,6 +1799,9 @@ def main():
     
     # Create and run application
     app = ControllerApp(robot_ip)
+    
+    # Store robot_id for connection message
+    app.robot_id = robot_id
     
     # If we discovered the robot, apply calibration from discovery
     # (Otherwise it will be requested during connection)

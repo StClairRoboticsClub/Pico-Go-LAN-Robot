@@ -413,7 +413,7 @@ def _process_set_calibration_command(packet):
         return False
 
 
-def _process_set_profile_command(packet, sock, addr):
+def _process_set_profile_command(packet, sock, addr, underglow=None, lcd_display=None):
     """
     Process set_profile command - update robot name and color.
     
@@ -424,6 +424,8 @@ def _process_set_profile_command(packet, sock, addr):
         packet: Parsed JSON packet with profile data
         sock: UDP socket for response
         addr: Client address tuple
+        underglow: Underglow LED controller instance (optional)
+        lcd_display: LCD display instance (optional)
     """
     try:
         robot_id = packet.get("robot_id")
@@ -449,8 +451,23 @@ def _process_set_profile_command(packet, sock, addr):
             
             debug_print(f"Profile updated: {name} RGB{color}", force=True)
             
-            # Update underglow if active
-            # (This would require passing underglow instance, so we'll skip for now)
+            # Update underglow LEDs to new color immediately
+            if underglow:
+                try:
+                    # Update the robot_color attribute and set LEDs
+                    underglow.robot_color = tuple(color)
+                    underglow.set_color_all(tuple(color))
+                    debug_print(f"Underglow updated to RGB{color}", force=True)
+                except Exception as e:
+                    debug_print(f"Failed to update underglow: {e}", force=True)
+            
+            # Update LCD display if available
+            if lcd_display:
+                try:
+                    # LCD will show new name on next update
+                    debug_print(f"LCD will show new profile: {name}", force=True)
+                except Exception as e:
+                    debug_print(f"Failed to update LCD: {e}", force=True)
             
             response = {
                 "type": "profile_response",
@@ -467,7 +484,13 @@ def _process_set_profile_command(packet, sock, addr):
                 "message": f"Robot ID mismatch: expected {ROBOT_ID}, got {robot_id}"
             }
         
-        sock.sendto((json.dumps(response) + "\n").encode(), addr)
+        # Send response immediately
+        try:
+            response_msg = (json.dumps(response) + "\n").encode()
+            sock.sendto(response_msg, addr)
+            debug_print(f"Profile response sent to {addr}", force=True)
+        except Exception as e:
+            debug_print(f"Failed to send profile response: {e}", force=True)
         
     except Exception as e:
         debug_print(f"Error setting profile: {e}", force=True)
@@ -570,7 +593,7 @@ async def udp_server(motor_controller, safety_controller, lcd_display, underglow
                         continue
                     
                     elif cmd == "set_profile":
-                        _process_set_profile_command(packet, sock, addr)
+                        _process_set_profile_command(packet, sock, addr, underglow, lcd_display)
                         continue
                     
                     elif cmd == "drive":
