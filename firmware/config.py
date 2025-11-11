@@ -110,14 +110,14 @@ UNDERGLOW_BRIGHTNESS = 255  # Full brightness (0-255) - always 100%
 # Robot colors (RGB) - unique color per robot ID for identification
 # 8 configurable profiles matching ROBOT_NAMES
 ROBOT_COLORS = {
-    1: (255, 140, 0),    # THUNDER - Orange
-    2: (0, 255, 255),    # BLITZ - Cyan
-    3: (255, 0, 0),      # NITRO - Red
-    4: (0, 255, 0),      # TURBO - Green
-    5: (255, 255, 0),   # SPEED - Yellow
-    6: (138, 43, 226),  # BOLT - Purple
-    7: (255, 20, 147),  # FLASH - Pink
-    8: (0, 191, 255)    # STORM - Blue
+    1: (255, 140, 0),    # THUNDER - Orange (bright, high visibility)
+    2: (255, 255, 0),   # BLITZ - Yellow (bright, high visibility)
+    3: (255, 0, 0),     # NITRO - Red (bright, high visibility, changed from Magenta)
+    4: (0, 255, 0),     # TURBO - Green (bright, high visibility)
+    5: (255, 255, 255), # SPEED - White (bright, high visibility)
+    6: (0, 0, 255),     # BOLT - Blue (bright, high visibility, changed from Purple)
+    7: (0, 255, 128),   # FLASH - Teal (bright, high visibility, changed from Pink)
+    8: (0, 200, 255)    # STORM - Cyan (bright, high visibility)
 }
 ROBOT_COLOR = ROBOT_COLORS.get(ROBOT_ID, (255, 255, 255))  # Default to white
 

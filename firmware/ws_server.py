@@ -464,8 +464,9 @@ def _process_set_profile_command(packet, sock, addr, underglow=None, lcd_display
             # Update LCD display if available
             if lcd_display:
                 try:
-                    # LCD will show new name on next update
-                    debug_print(f"LCD will show new profile: {name}", force=True)
+                    # Force refresh LCD to show new profile graphic immediately
+                    lcd_display.refresh_current_state()
+                    debug_print(f"LCD updated with new profile graphic: {name}", force=True)
                 except Exception as e:
                     debug_print(f"Failed to update LCD: {e}", force=True)
             

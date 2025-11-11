@@ -19,13 +19,13 @@ import time
 # Default robot profiles (8 profiles)
 DEFAULT_PROFILES = {
     1: {"name": "THUNDER", "color": [255, 140, 0]},   # Orange
-    2: {"name": "BLITZ", "color": [0, 255, 255]},     # Cyan
-    3: {"name": "NITRO", "color": [255, 0, 0]},       # Red
-    4: {"name": "TURBO", "color": [0, 255, 0]},       # Green
-    5: {"name": "SPEED", "color": [255, 255, 0]},     # Yellow
-    6: {"name": "BOLT", "color": [138, 43, 226]},     # Purple
-    7: {"name": "FLASH", "color": [255, 20, 147]},    # Pink
-    8: {"name": "STORM", "color": [0, 191, 255]}      # Blue
+    2: {"name": "BLITZ", "color": [255, 255, 0]},    # Yellow
+    3: {"name": "NITRO", "color": [255, 0, 0]},      # Red (changed from Magenta)
+    4: {"name": "TURBO", "color": [0, 255, 0]},      # Green
+    5: {"name": "SPEED", "color": [255, 255, 255]},   # White
+    6: {"name": "BOLT", "color": [0, 0, 255]},       # Blue (changed from Purple)
+    7: {"name": "FLASH", "color": [0, 255, 128]},    # Teal (changed from Pink)
+    8: {"name": "STORM", "color": [0, 200, 255]}     # Cyan
 }
 
 ROBOT_PORT = 8765

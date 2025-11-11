@@ -577,7 +577,7 @@ class DisplayController:
         
         # Window configuration
         self.window_width = 700
-        self.window_height = 600
+        self.window_height = 700  # Increased to fit profile dropdown
         self.bg_color = (20, 20, 30)  # Dark blue-gray
         self.accent_color = (100, 200, 255)  # Light blue
         self.text_color = (255, 255, 255)  # White
@@ -608,12 +608,19 @@ class DisplayController:
         self.runtime = 0.0
         self.connected = False
         
+        # Profile dropdown state
+        self.profiles = {}  # {id: {"name": str, "color": [r, g, b]}}
+        self.current_profile_id = None
+        self.dropdown_open = False
+        self.dropdown_rect = None
+        self.profile_callback = None  # Callback function when profile changes
+        
         # Initial render
         self._draw_ui()
     
     def update(self, robot_ip=None, robot_id=None, controller_type=None, 
                throttle=None, steer=None, hz=None, packets_sent=None, 
-               runtime=None, connected=None):
+               runtime=None, connected=None, profiles=None, current_profile_id=None):
         """Update display state."""
         if robot_ip is not None:
             self.robot_ip = robot_ip
@@ -633,6 +640,14 @@ class DisplayController:
             self.runtime = runtime
         if connected is not None:
             self.connected = connected
+        if profiles is not None:
+            self.profiles = profiles
+        if current_profile_id is not None:
+            self.current_profile_id = current_profile_id
+    
+    def set_profile_callback(self, callback):
+        """Set callback function to call when profile is selected."""
+        self.profile_callback = callback
     
     def _draw_ui(self):
         """Draw the UI in the pygame window."""
@@ -646,6 +661,16 @@ class DisplayController:
         self.screen.blit(title_text, (20, 12))
         subtitle_text = self.body_font.render("Controller", True, (200, 200, 200))
         self.screen.blit(subtitle_text, (20, 35))
+        
+        # Profile selection dropdown (top-right corner)
+        dropdown_width = 250
+        dropdown_height = 35
+        dropdown_x = self.window_width - dropdown_width - 20  # Right side with 20px margin
+        dropdown_y = 30  # Below title bar with room for label
+        
+        # Profile label (above dropdown)
+        profile_label = self.small_font.render("Profile:", True, (200, 200, 200))
+        self.screen.blit(profile_label, (dropdown_x, 10))  # At top of window
         
         y = 70
         
@@ -673,6 +698,63 @@ class DisplayController:
         ctrl_text = self.body_font.render(f"Controller: {self.controller_type}", True, self.text_color)
         self.screen.blit(ctrl_text, (40, y))
         y += 40
+        
+        # Get current profile name
+        current_profile_name = "Select Profile"
+        if self.current_profile_id and self.current_profile_id in self.profiles:
+            current_profile_name = self.profiles[self.current_profile_id]['name']
+        elif not self.profiles:
+            current_profile_name = "No profiles available"
+        
+        # Draw dropdown button (fully opaque)
+        button_color = (60, 60, 80) if not self.dropdown_open else (80, 80, 100)
+        pygame.draw.rect(self.screen, button_color, (dropdown_x, dropdown_y, dropdown_width, dropdown_height))
+        pygame.draw.rect(self.screen, self.accent_color, (dropdown_x, dropdown_y, dropdown_width, dropdown_height), 2)
+        
+        # Profile name text
+        profile_text = self.body_font.render(current_profile_name, True, self.text_color)
+        self.screen.blit(profile_text, (dropdown_x + 10, dropdown_y + 8))
+        
+        # Dropdown arrow
+        arrow_points = [
+            (dropdown_x + dropdown_width - 20, dropdown_y + 10),
+            (dropdown_x + dropdown_width - 10, dropdown_y + 10),
+            (dropdown_x + dropdown_width - 15, dropdown_y + 20)
+        ]
+        pygame.draw.polygon(self.screen, self.accent_color, arrow_points)
+        
+        # Store dropdown rect for click detection
+        self.dropdown_rect = pygame.Rect(dropdown_x, dropdown_y, dropdown_width, dropdown_height)
+        
+        # Draw dropdown list if open (fully opaque)
+        if self.dropdown_open and self.profiles:
+            list_y = dropdown_y + dropdown_height + 2
+            list_height = min(len(self.profiles) * 30, 240)  # Max 240px height
+            
+            # Fully opaque background for dropdown list (darker for contrast)
+            pygame.draw.rect(self.screen, (30, 30, 40), (dropdown_x, list_y, dropdown_width, list_height))
+            pygame.draw.rect(self.screen, self.accent_color, (dropdown_x, list_y, dropdown_width, list_height), 2)
+            
+            # Draw each profile option
+            item_y = list_y + 5
+            for profile_id, profile in sorted(self.profiles.items()):
+                if item_y + 25 > list_y + list_height:
+                    break  # Don't draw beyond list height
+                
+                # Highlight if this is the current profile (fully opaque)
+                if profile_id == self.current_profile_id:
+                    pygame.draw.rect(self.screen, (70, 70, 90), 
+                                   (dropdown_x + 2, item_y - 2, dropdown_width - 4, 25))
+                
+                # Profile name
+                profile_name_text = self.body_font.render(profile['name'], True, self.text_color)
+                self.screen.blit(profile_name_text, (dropdown_x + 10, item_y))
+                
+                # Color indicator dot
+                color = profile.get('color', [255, 255, 255])
+                pygame.draw.circle(self.screen, color, (dropdown_x + dropdown_width - 20, item_y + 10), 8)
+                
+                item_y += 30
         
         # Controls section
         controls_header = self.header_font.render("Controls", True, self.accent_color)
@@ -817,7 +899,7 @@ class DisplayController:
         info_text = self.small_font.render("Keep this window focused to control the robot", True, (150, 150, 150))
         self.screen.blit(info_text, (20, y))
         y += 20
-        info_text2 = self.small_font.render("Terminal: Type 'profile' to configure robot", True, (150, 150, 150))
+        info_text2 = self.small_font.render("Click profile dropdown to change robot profile", True, (150, 150, 150))
         self.screen.blit(info_text2, (20, y))
         
         pygame.display.flip()
@@ -827,6 +909,39 @@ class DisplayController:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return True
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left mouse button
+                    mouse_pos = event.pos
+                    
+                    # Check if clicking on dropdown button
+                    if self.dropdown_rect and self.dropdown_rect.collidepoint(mouse_pos):
+                        self.dropdown_open = not self.dropdown_open
+                    elif self.dropdown_open and self.profiles:
+                        # Check if clicking on a profile option
+                        dropdown_width = 250
+                        list_height = min(len(self.profiles) * 30, 240)
+                        dropdown_x = self.dropdown_rect.x
+                        list_y = self.dropdown_rect.y + self.dropdown_rect.height + 2
+                        
+                        list_rect = pygame.Rect(dropdown_x, list_y, dropdown_width, list_height)
+                        if list_rect.collidepoint(mouse_pos):
+                            # Calculate which profile was clicked
+                            relative_y = mouse_pos[1] - list_y
+                            profile_index = (relative_y - 5) // 30  # Account for 5px padding
+                            
+                            sorted_profiles = sorted(self.profiles.items())
+                            if 0 <= profile_index < len(sorted_profiles):
+                                selected_profile_id, selected_profile = sorted_profiles[profile_index]
+                                
+                                # Call callback if set
+                                if self.profile_callback:
+                                    self.profile_callback(selected_profile_id, selected_profile)
+                                
+                                self.current_profile_id = selected_profile_id
+                                self.dropdown_open = False
+                    else:
+                        # Click outside dropdown - close it
+                        self.dropdown_open = False
         return False
     
     def cleanup(self):
@@ -1309,13 +1424,28 @@ class ControllerApp:
             self.controller = KeyboardController()
             self.controller_type = "Keyboard"
         
+        # Initialize robot_id first (will be set from discovery later)
+        self.robot_id = None  # Will be set from discovery
+        
         # Update display with controller type
         self.display.update(controller_type=self.controller_type, robot_ip=robot_ip)
+        
+        # Set up profile callback (wrapper to queue profile changes)
+        def profile_callback(profile_id, profile):
+            # Put profile change request in queue (non-blocking)
+            try:
+                self.profile_change_queue.put_nowait((profile_id, profile))
+            except:
+                pass  # Queue full - ignore
+        self.display.set_profile_callback(profile_callback)
+        
+        # Update display with profiles (robot_id will be None initially, updated later)
+        profiles = self._get_profiles()
+        self.display.update(profiles=profiles, current_profile_id=self.robot_id)
         
         self.connection = RobotConnection(robot_ip, ROBOT_PORT)
         self.running = False
         self.control_rate = 1.0 / CONTROL_RATE_HZ
-        self.robot_id = None  # Will be set from discovery
         
         # Statistics
         self.packets_sent = 0
@@ -1329,18 +1459,38 @@ class ControllerApp:
         
         # Terminal command handling
         self.command_queue = asyncio.Queue()
+        
+        # Profile change queue (for GUI dropdown selections)
+        self.profile_change_queue = asyncio.Queue()
+    
+    async def _on_profile_selected(self, profile_id, profile):
+        """Handle profile selection from dropdown menu."""
+        if not self.robot_id:
+            print("❌ Robot ID unknown - cannot change profile")
+            return
+        
+        # Send profile configuration
+        profile_name_upper = profile['name'].upper()
+        success, message = await self._send_profile_config(self.robot_id, profile_name_upper, profile['color'])
+        
+        if success:
+            print(f"✅ Changed to profile: {profile_name_upper}")
+            # Update display with new current profile
+            self.display.update(current_profile_id=profile_id)
+        else:
+            print(f"❌ Failed to change profile: {message}")
     
     def _get_profiles(self):
         """Get robot profiles dictionary."""
         return {
             1: {"name": "THUNDER", "color": [255, 140, 0]},   # Orange
-            2: {"name": "BLITZ", "color": [0, 255, 255]},     # Cyan
-            3: {"name": "NITRO", "color": [255, 0, 0]},       # Red
+            2: {"name": "BLITZ", "color": [255, 255, 0]},      # Yellow
+            3: {"name": "NITRO", "color": [255, 0, 0]},        # Red (changed from Magenta)
             4: {"name": "TURBO", "color": [0, 255, 0]},       # Green
-            5: {"name": "SPEED", "color": [255, 255, 0]},     # Yellow
-            6: {"name": "BOLT", "color": [138, 43, 226]},     # Purple
-            7: {"name": "FLASH", "color": [255, 20, 147]},    # Pink
-            8: {"name": "STORM", "color": [0, 191, 255]}      # Blue
+            5: {"name": "SPEED", "color": [255, 255, 255]},   # White
+            6: {"name": "BOLT", "color": [0, 0, 255]},        # Blue (changed from Purple)
+            7: {"name": "FLASH", "color": [0, 255, 128]},     # Teal (changed from Pink)
+            8: {"name": "STORM", "color": [0, 200, 255]}      # Cyan
         }
     
     def _show_boot_messages(self):
@@ -1573,10 +1723,13 @@ class ControllerApp:
             return
         
         # Update display with connection info (all status in pygame window)
+        profiles = self._get_profiles()
         self.display.update(
             robot_ip=self.robot_ip,
             robot_id=self.robot_id,
-            connected=True
+            connected=True,
+            profiles=profiles,
+            current_profile_id=self.robot_id
         )
         
         # Show profile information and commands on boot
@@ -1614,6 +1767,13 @@ class ControllerApp:
                 # Check for display window close
                 if self.display.process_events():
                     break
+                
+                # Check for profile change requests from GUI
+                try:
+                    profile_id, profile = self.profile_change_queue.get_nowait()
+                    await self._on_profile_selected(profile_id, profile)
+                except asyncio.QueueEmpty:
+                    pass
                 
                 # Check for charging mode combo (BACK + START for Xbox)
                 if self.controller_type == "Xbox":

@@ -57,9 +57,10 @@ class UnderglowController:
         self.ar = None
         self.robot_color = ROBOT_COLOR  # RGB tuple (0-255, 0-255, 0-255)
         self.current_state = None
-        self.flash_state = False
+        self.flash_state = False  # False = robot color, True = red
         self.last_flash_time = 0
-        self.flash_interval_ms = 500  # Flash every 500ms
+        self.robot_color_duration_ms = 1500  # Robot color for 1.5 seconds
+        self.red_duration_ms = 100  # Red for 0.10 seconds
         
         if not self.enabled:
             debug_print("Underglow disabled in config", force=True)
@@ -108,35 +109,34 @@ class UnderglowController:
             debug_print(f"Underglow set_color error: {e}")
     
     def update_flash(self):
-        """Update flashing animation based on time. Only flashes for disconnected states and CLIENT_OK."""
+        """Update flashing animation. Only flashes red when disconnected (LINK_LOST).
+        Pattern: Robot color for 1.5s, red for 0.10s (half brightness), repeat."""
         if not self.enabled or not self.sm:
             return
         
-        # Flash for BOOT, LINK_LOST, and CLIENT_OK states
-        # NET_UP and DRIVING should stay solid
-        if self.current_state not in [STATE_BOOT, STATE_LINK_LOST, STATE_CLIENT_OK]:
+        # Only flash for disconnected states (LINK_LOST, BOOT)
+        # All connected states (NET_UP, CLIENT_OK, DRIVING) stay solid robot color
+        if self.current_state not in [STATE_BOOT, STATE_LINK_LOST]:
             return
         
         current_time = time.ticks_ms()
+        elapsed = time.ticks_diff(current_time, self.last_flash_time)
         
-        # Check if it's time to toggle flash state
-        if time.ticks_diff(current_time, self.last_flash_time) >= self.flash_interval_ms:
-            self.flash_state = not self.flash_state
-            self.last_flash_time = current_time
-            
-            # Update color based on state
-            if self.current_state in [STATE_LINK_LOST, STATE_BOOT]:
-                # Flash between robot color and RED (disconnected)
-                if self.flash_state:
-                    self.set_color_all(self.robot_color)
-                else:
-                    self.set_color_all((255, 0, 0))  # BRIGHT RED
-            elif self.current_state == STATE_CLIENT_OK:
-                # Flash between robot color and ORANGE (controller connected, preparing to drive)
-                if self.flash_state:
-                    self.set_color_all(self.robot_color)
-                else:
-                    self.set_color_all((255, 140, 0))  # ORANGE (matches user requirement)
+        # Flash pattern: robot color for 1.5s, red for 0.10s (half brightness), repeat
+        if not self.flash_state:
+            # Currently showing robot color
+            if elapsed >= self.robot_color_duration_ms:
+                # Switch to red (half brightness)
+                self.flash_state = True
+                self.set_color_all((128, 0, 0))  # Half brightness red (128/255)
+                self.last_flash_time = current_time
+        else:
+            # Currently showing red
+            if elapsed >= self.red_duration_ms:
+                # Switch back to robot color
+                self.flash_state = False
+                self.set_color_all(self.robot_color)
+                self.last_flash_time = current_time
     
     def set_state(self, state):
         """
@@ -157,18 +157,19 @@ class UnderglowController:
                 # Solid robot color when actively driving
                 self.set_color_all(self.robot_color)
                 debug_print(f"Underglow: DRIVING - solid {self.robot_color}")
-            elif state in [STATE_LINK_LOST, STATE_BOOT]:
-                # Start flashing robot color / RED (disconnected)
-                self.set_color_all(self.robot_color)
-                debug_print(f"Underglow: {state} - flash robot/RED")
-            elif state == STATE_CLIENT_OK:
-                # Start flashing robot color / ORANGE (controller connected, preparing to drive)
-                self.set_color_all(self.robot_color)
-                debug_print(f"Underglow: CLIENT_OK - flash robot/ORANGE")
             elif state == STATE_NET_UP:
                 # Solid robot color when WiFi connected
                 self.set_color_all(self.robot_color)
                 debug_print(f"Underglow: NET_UP - solid {self.robot_color}")
+            elif state == STATE_CLIENT_OK:
+                # Solid robot color when controller connected (ready to drive)
+                self.set_color_all(self.robot_color)
+                debug_print(f"Underglow: CLIENT_OK - solid {self.robot_color}")
+            elif state in [STATE_LINK_LOST, STATE_BOOT]:
+                # Flash pattern when disconnected: robot color 1.5s, red 0.10s (half brightness), repeat
+                self.set_color_all(self.robot_color)  # Start with robot color
+                self.flash_state = False
+                debug_print(f"Underglow: {state} - flash pattern (robot 1.5s, red 0.10s half brightness)")
         
         except Exception as e:
             debug_print(f"Underglow state update error: {e}")

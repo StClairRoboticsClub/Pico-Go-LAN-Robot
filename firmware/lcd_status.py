@@ -11,8 +11,9 @@ import time
 from config import (
     STATE_BOOT, STATE_NET_UP, STATE_CLIENT_OK,
     STATE_DRIVING, STATE_LINK_LOST, STATE_E_STOP,
-    ROBOT_NAME, ROBOT_ID
+    ROBOT_ID
 )
+import config  # Import module to access updated ROBOT_NAME
 from utils import debug_print
 
 # RGB565 Colors (BGR format for this display)
@@ -293,7 +294,10 @@ class LCDStatus:
         center_x = 120
         center_y = 67
         
-        if "THUNDER" in ROBOT_NAME:
+        # Get current robot name from config (supports dynamic profile changes)
+        robot_name = config.ROBOT_NAME
+        
+        if "THUNDER" in robot_name:
             # Purple and black patterned background
             for y in range(20, 135):
                 for x in range(0, 240, 3):
@@ -344,7 +348,7 @@ class LCDStatus:
             self.display.text("THUNDER", 70, 121, YELLOW)
             self.display.text("THUNDER", 71, 121, YELLOW)
             
-        elif "BLITZ" in ROBOT_NAME:
+        elif "BLITZ" in robot_name:
             # MASSIVE Speed lines - full screen width
             for i in range(10):
                 y_pos = 25 + i * 10
@@ -361,7 +365,7 @@ class LCDStatus:
             self.display.text("BLITZ", 85, 106, CYAN)
             self.display.text("BLITZ", 86, 106, CYAN)
             
-        elif "NITRO" in ROBOT_NAME:
+        elif "NITRO" in robot_name:
             # MASSIVE Flame wall across screen
             for i in range(12):
                 x_pos = 10 + i * 18
@@ -378,7 +382,7 @@ class LCDStatus:
             self.display.text("NITRO", 85, 106, RED)
             self.display.text("NITRO", 86, 106, RED)
             
-        elif "TURBO" in ROBOT_NAME:
+        elif "TURBO" in robot_name:
             # MASSIVE Spinning turbo pattern
             for r in range(5, 55, 8):
                 self.display.ellipse(center_x, center_y, r, r, GREEN)
@@ -396,7 +400,7 @@ class LCDStatus:
             self.display.text("TURBO", 85, 106, GREEN)
             self.display.text("TURBO", 86, 106, GREEN)
             
-        elif "SPEED" in ROBOT_NAME:
+        elif "SPEED" in robot_name:
             # MASSIVE Arrow pattern - full screen
             for i in range(8):
                 x_start = 10 + i * 10
@@ -414,6 +418,92 @@ class LCDStatus:
             self.display.text("SPEED", 86, 105, CYAN)
             self.display.text("SPEED", 85, 106, CYAN)
             self.display.text("SPEED", 86, 106, CYAN)
+            
+        elif "BOLT" in robot_name:
+            # MASSIVE Lightning bolt pattern - purple theme
+            # Purple background pattern
+            for y in range(20, 135):
+                for x in range(0, 240, 4):
+                    if (x + y) % 12 < 6:
+                        self.display.pixel(x, y, MAGENTA)
+            
+            # HUGE lightning bolt - similar to THUNDER but purple
+            bolt_points = [
+                (150, 20), (120, 50), (140, 55), (110, 80),
+                (130, 85), (100, 110), (120, 115), (90, 135)
+            ]
+            # Draw thick purple bolt
+            for i in range(len(bolt_points) - 1):
+                x1, y1 = bolt_points[i]
+                x2, y2 = bolt_points[i + 1]
+                for thickness in range(18):
+                    offset = thickness - 9
+                    self.display.line(x1 + offset, y1, x2 + offset, y2, MAGENTA)
+            # White core
+            for i in range(len(bolt_points) - 1):
+                x1, y1 = bolt_points[i]
+                x2, y2 = bolt_points[i + 1]
+                for thickness in range(5):
+                    offset = thickness - 2
+                    self.display.line(x1 + offset, y1, x2 + offset, y2, WHITE)
+            
+            # HUGE text
+            self.display.text("BOLT", 85, 105, MAGENTA)
+            self.display.text("BOLT", 86, 105, MAGENTA)
+            self.display.text("BOLT", 85, 106, MAGENTA)
+            self.display.text("BOLT", 86, 106, MAGENTA)
+            
+        elif "FLASH" in robot_name:
+            # MASSIVE Flash pattern - pink theme with burst effect
+            # Pink burst from center
+            for angle in range(0, 360, 15):
+                import math
+                for r in range(10, 60, 5):
+                    x_end = int(center_x + r * math.cos(math.radians(angle)))
+                    y_end = int(center_y + r * math.sin(math.radians(angle)))
+                    if 0 <= x_end < 240 and 0 <= y_end < 135:
+                        self.display.pixel(x_end, y_end, MAGENTA)
+            
+            # Concentric circles
+            for r in range(10, 50, 8):
+                self.display.ellipse(center_x, center_y, r, r, MAGENTA)
+            
+            # HUGE text
+            self.display.text("FLASH", 80, 105, MAGENTA)
+            self.display.text("FLASH", 81, 105, MAGENTA)
+            self.display.text("FLASH", 80, 106, MAGENTA)
+            self.display.text("FLASH", 81, 106, MAGENTA)
+            
+        elif "STORM" in robot_name:
+            # MASSIVE Storm pattern - blue theme with rain/clouds
+            # Blue storm clouds at top
+            for i in range(8):
+                cloud_x = 20 + i * 30
+                cloud_y = 15 + (i % 3) * 5
+                # Draw cloud puffs
+                for offset_x in range(-15, 16, 3):
+                    for offset_y in range(-8, 9, 2):
+                        if offset_x*offset_x + offset_y*offset_y < 100:
+                            self.display.pixel(cloud_x + offset_x, cloud_y + offset_y, BLUE)
+            
+            # Rain lines
+            for i in range(15):
+                x_pos = 15 + i * 15
+                for y in range(40, 135, 8):
+                    self.display.vline(x_pos, y, 6, CYAN)
+            
+            # Lightning strikes
+            for i in range(3):
+                strike_x = 60 + i * 60
+                self.display.vline(strike_x, 30, 50, YELLOW)
+                self.display.vline(strike_x + 1, 30, 50, YELLOW)
+                self.display.vline(strike_x - 1, 30, 50, YELLOW)
+            
+            # HUGE text
+            self.display.text("STORM", 80, 105, BLUE)
+            self.display.text("STORM", 81, 105, BLUE)
+            self.display.text("STORM", 80, 106, BLUE)
+            self.display.text("STORM", 81, 106, BLUE)
         else:
             # Generic HUGE robot
             self.display.rect(center_x - 40, center_y - 40, 80, 80, WHITE)
@@ -425,7 +515,8 @@ class LCDStatus:
         """Draw consistent racing-style header with robot name on all screens."""
         # Robot name banner at top - ALWAYS VISIBLE
         self.display.fill_rect(0, 0, 240, 20, BLACK)
-        self._draw_large_text(ROBOT_NAME, 10, 5, YELLOW, 2)
+        # Get current robot name from config (supports dynamic profile changes)
+        self._draw_large_text(config.ROBOT_NAME, 10, 5, YELLOW, 2)
         
         # Robot ID badge
         id_text = f"#{ROBOT_ID}"
@@ -492,13 +583,15 @@ class LCDStatus:
                     self.display.fill_rect(i, j, 6, 6, WHITE)
         
         # Robot name - LARGE and centered (single layer, no bold)
-        name_width = len(ROBOT_NAME) * 8  # Estimate width
+        # Get current robot name from config (supports dynamic profile changes)
+        robot_name = config.ROBOT_NAME
+        name_width = len(robot_name) * 8  # Estimate width
         name_x = (240 - name_width) // 2
-        self.display.text(ROBOT_NAME, name_x, 35, YELLOW)
+        self.display.text(robot_name, name_x, 35, YELLOW)
         # Make it bigger with proper spacing
-        self.display.text(ROBOT_NAME, name_x, 36, YELLOW)
-        self.display.text(ROBOT_NAME, name_x + 1, 35, YELLOW)
-        self.display.text(ROBOT_NAME, name_x + 1, 36, YELLOW)
+        self.display.text(robot_name, name_x, 36, YELLOW)
+        self.display.text(robot_name, name_x + 1, 35, YELLOW)
+        self.display.text(robot_name, name_x + 1, 36, YELLOW)
         
         # Robot ID racing plate - cleaner, centered
         plate_x = 85
@@ -644,7 +737,8 @@ class LCDStatus:
                 self.display.pixel(34 - i, 5 + i, RED)
         
         # Center: Robot name and ID
-        name_text = f"{ROBOT_NAME} #{ROBOT_ID}"
+        # Get current robot name from config (supports dynamic profile changes)
+        name_text = f"{config.ROBOT_NAME} #{ROBOT_ID}"
         name_width = len(name_text) * 8
         name_x = (240 - name_width) // 2
         self.display.text(name_text, name_x, 5, YELLOW)
@@ -858,6 +952,30 @@ class LCDStatus:
         """Force update disabled - causes latency during driving."""
         # DISABLED: LCD updates during driving cause 23ms latency
         pass
+    
+    def refresh_current_state(self):
+        """Refresh the LCD display with the current state (useful after profile changes)."""
+        if not self.display or not self.current_state:
+            return
+        
+        # Re-render the current state to show updated profile graphics
+        try:
+            if self.current_state == STATE_DRIVING:
+                # Show driving active screen with new profile graphic
+                self._show_driving_active()
+            elif self.current_state == STATE_BOOT:
+                self._show_boot()
+            elif self.current_state == STATE_NET_UP:
+                self._show_net_up()
+            elif self.current_state == STATE_CLIENT_OK:
+                self._show_client_ok()
+            elif self.current_state == STATE_LINK_LOST:
+                self._show_link_lost()
+            elif self.current_state == STATE_E_STOP:
+                self._show_e_stop()
+            debug_print(f"LCD refreshed with new profile graphic", force=True)
+        except Exception as e:
+            debug_print(f"LCD refresh error: {e}", force=True)
     
     def show_error(self, message):
         """Display error message."""
