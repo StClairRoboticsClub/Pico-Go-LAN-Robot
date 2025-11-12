@@ -1,0 +1,20 @@
+# Pico-Go LAN Robot - Python Dependencies
+# =========================================
+# Unified requirements for controller and development tools
+
+# Core controller dependencies
+pygame>=2.5.0
+asyncio-compat>=0.1.2
+
+# GUI Framework (for robot_master_gui.py)
+customtkinter>=5.2.0
+
+# MicroPython tools
+mpremote>=1.21.0
+
+# Network diagnostics (optional)
+scapy>=2.5.0
+
+# Build tools (optional)
+pyinstaller>=6.0.0
+
