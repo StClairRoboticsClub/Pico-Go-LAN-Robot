@@ -1,0 +1,24 @@
+# MicroPython Dependencies for Pico-Go LAN Robot Firmware
+# Raspberry Pi Pico W with MicroPython 1.22+
+
+# Installation instructions:
+# Connect Pico W via USB, then:
+#   mpremote mip install <package>
+
+# Core built-in libraries (no installation needed):
+# - uasyncio (async/await support)
+# - network (Wi-Fi connectivity)
+# - machine (GPIO, PWM, SPI)
+# - json (JSON parsing)
+# - time (timing functions)
+
+# Optional external libraries:
+
+# WebSocket support (if using WebSocket instead of TCP)
+# mpremote mip install uwebsocket
+
+# ST7789 LCD driver (may be pre-installed on Waveshare board)
+# mpremote mip install st7789
+
+# Note: Most functionality uses built-in MicroPython libraries.
+# The firmware is designed to work without external dependencies.
