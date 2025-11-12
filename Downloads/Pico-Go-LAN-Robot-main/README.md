@@ -15,7 +15,6 @@ Control your robot with an Xbox controller over Wi-Fi. Perfect for robotics educ
 - 🌈 **RGB LED underglow** with color-coded status
 - 🏁 **8 robot profiles** - customize name and colors
 - 🔍 **Auto-discovery** - automatically finds robots on network via UDP broadcast
-- 🌐 **mDNS support** - robots accessible via hostname (picogo1.local, picogo2.local, etc.)
 
 ---
 
@@ -41,14 +40,7 @@ Or configure your own network in `firmware/config.py`.
 
 **Note**: The robot uses UDP protocol on port 8765 for low-latency control (not WebSocket despite the module name).
 
-### 3. Configure Robot
-
-Edit `firmware/config.py` and change:
-```python
-ROBOT_ID = 1  # Change to 1-8 for different robot profiles
-```
-
-### 4. Upload Robot Code
+### 3. Upload Robot Code
 
 ```bash
 # Install mpremote (MicroPython tool)
@@ -66,7 +58,7 @@ mpremote cp *.py :
 - **DRIVING**: Active control (shows robot icon, connection status)
 - **LINK_LOST**: Connection timeout (motors stopped for safety)
 
-### 5. Launch Master GUI
+### 4. Launch Master GUI
 
 ```bash
 # Install dependencies
@@ -117,11 +109,10 @@ Pico-Go-LAN-Robot/
 │   └── utils.py          # Utility functions
 ├── controller/           # Python controller application
 │   ├── robot_master_gui.py  # ⭐ MAIN ENTRY POINT - Launch this ONLY!
-│   └── subsidiary/       # Subsidiary modules (do not run directly)
-│       ├── controller_xbox.py  # Xbox controller (launched from Master GUI)
-│       ├── calibrate.py      # Calibration tool (launched from Master GUI)
-│       ├── controller_manager.py  # Manages controller subprocesses
-│       └── robot_config.py   # Robot configuration storage
+│   ├── controller_xbox.py  # Xbox controller (launched from Master GUI)
+│   ├── calibrate.py      # Calibration tool (launched from Master GUI)
+│   ├── controller_manager.py  # Manages controller subprocesses
+│   └── robot_config.py   # Robot configuration storage
 ├── requirements.txt      # Python dependencies
 └── README.md            # This file
 ```
@@ -130,7 +121,7 @@ Pico-Go-LAN-Robot/
 - `robot_master_gui.py` is the **ONLY** entry point
 - `controller_xbox.py` and `calibrate.py` are **subsidiary modules** - they cannot be run directly
 - They are automatically launched by the Master GUI as subprocesses
-- Do NOT build them as separate applications - they are part of the Master GUI system
+- All controller modules are in the `controller/` directory for simplicity
 
 ---
 
