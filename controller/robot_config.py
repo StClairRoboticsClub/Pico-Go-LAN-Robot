@@ -67,6 +67,7 @@ class RobotConfig:
                 "ssid": "DevNet-2.4G",
                 "password": "DevPass**99"
             },
+            "gamepad_assignments": {},  # robot_ip -> joystick_index
             "version": 1
         }
     
@@ -116,6 +117,11 @@ class RobotConfig:
         self._config["robots"] = [r for r in robots if r.get("ip") != ip]
         self._save_config()
     
+    def clear_all_robots(self):
+        """Clear all saved robots from configuration."""
+        self._config["robots"] = []
+        self._save_config()
+    
     def update_robot(self, ip: str, **kwargs):
         """Update robot properties."""
         robots = self.get_robots()
@@ -137,3 +143,20 @@ class RobotConfig:
             "password": password
         }
         self._save_config()
+    
+    def get_gamepad_assignments(self) -> Dict[str, int]:
+        """Get gamepad assignments (robot_ip -> joystick_index)."""
+        return self._config.get("gamepad_assignments", {})
+    
+    def set_gamepad_assignment(self, robot_ip: str, joystick_index: int):
+        """Set gamepad assignment for a robot."""
+        if "gamepad_assignments" not in self._config:
+            self._config["gamepad_assignments"] = {}
+        self._config["gamepad_assignments"][robot_ip] = joystick_index
+        self._save_config()
+    
+    def remove_gamepad_assignment(self, robot_ip: str):
+        """Remove gamepad assignment for a robot."""
+        if "gamepad_assignments" in self._config:
+            self._config["gamepad_assignments"].pop(robot_ip, None)
+            self._save_config()

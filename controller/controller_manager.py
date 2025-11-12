@@ -106,14 +106,22 @@ class ControllerManager:
                 # Check in same directory as master GUI executable
                 bundled_exe = APP_DIR / exe_name
                 if bundled_exe.exists():
-                    # Pass joystick index as second argument (only for xbox controller)
+                    # Pass joystick index as second argument, robot_id as third (only for xbox controller)
                     if controller_type == "xbox":
-                        process = subprocess.Popen(
-                            [str(bundled_exe), robot_ip, str(joystick_index)],
-                            cwd=str(APP_DIR),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE
-                        )
+                        if robot_id is not None:
+                            process = subprocess.Popen(
+                                [str(bundled_exe), robot_ip, str(joystick_index), str(robot_id)],
+                                cwd=str(APP_DIR),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE
+                            )
+                        else:
+                            process = subprocess.Popen(
+                                [str(bundled_exe), robot_ip, str(joystick_index)],
+                                cwd=str(APP_DIR),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE
+                            )
                     else:
                         process = subprocess.Popen(
                             [str(bundled_exe), robot_ip],
@@ -124,40 +132,111 @@ class ControllerManager:
                 else:
                     # Fall back to Python script (if available)
                     if script_path.exists():
-                        # Pass joystick index as second argument (only for xbox controller)
+                        # Ensure we use the correct Python interpreter
+                        python_exe = sys.executable
+                        if not python_exe or not os.path.exists(python_exe):
+                            python_exe = "python3"
+                        
+                        # Use absolute path for script to avoid path resolution issues
+                        script_abs_path = os.path.abspath(str(script_path))
+                        
+                        # Pass joystick index as second argument, robot_id as third (only for xbox controller)
                         if controller_type == "xbox":
-                            process = subprocess.Popen(
-                                [sys.executable, str(script_path), robot_ip, str(joystick_index)],
-                                cwd=str(APP_DIR),
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE
-                            )
+                            if robot_id is not None:
+                                cmd = [python_exe, script_abs_path, robot_ip, str(joystick_index), str(robot_id)]
+                            else:
+                                cmd = [python_exe, script_abs_path, robot_ip, str(joystick_index)]
                         else:
-                            process = subprocess.Popen(
-                                [sys.executable, str(script_path), robot_ip],
-                                cwd=str(APP_DIR),
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE
-                            )
+                            cmd = [python_exe, script_abs_path, robot_ip]
+                        
+                        # Launch with proper environment - don't capture output so window can display
+                        creation_flags = 0
+                        if platform.system() == "Windows":
+                            import subprocess as sp
+                            creation_flags = sp.CREATE_NEW_CONSOLE
+                        
+                        process = subprocess.Popen(
+                            cmd,
+                            cwd=str(APP_DIR),
+                            stdout=None,  # Don't capture - let it display in its own window
+                            stderr=None,  # Don't capture - let errors show
+                            stdin=None,   # Don't capture stdin
+                            creationflags=creation_flags if platform.system() == "Windows" else 0,
+                            start_new_session=True if platform.system() != "Windows" else False
+                        )
                     else:
                         raise FileNotFoundError(f"Could not find {exe_name} or {script_name}")
             else:
                 # Running as script - use Python
-                # Pass joystick index as second argument (only for xbox controller)
+                # Ensure we use the correct Python interpreter
+                python_exe = sys.executable
+                if not python_exe or not os.path.exists(python_exe):
+                    # Fallback: try python3
+                    python_exe = "python3"
+                
+                # Use absolute path for script to avoid path resolution issues
+                script_abs_path = os.path.abspath(str(script_path))
+                
+                # Pass joystick index as second argument, robot_id as third (only for xbox controller)
+                # -1 is valid for keyboard, 0-7 for gamepads
                 if controller_type == "xbox":
-                    process = subprocess.Popen(
-                        [sys.executable, str(script_path), robot_ip, str(joystick_index)],
-                        cwd=str(script_path.parent),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
+                    if robot_id is not None:
+                        cmd = [python_exe, script_abs_path, robot_ip, str(joystick_index), str(robot_id)]
+                    else:
+                        cmd = [python_exe, script_abs_path, robot_ip, str(joystick_index)]
                 else:
-                    process = subprocess.Popen(
-                        [sys.executable, str(script_path), robot_ip],
-                        cwd=str(script_path.parent),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
+                    cmd = [python_exe, script_abs_path, robot_ip]
+                
+                # Debug: print command for troubleshooting
+                print(f"Launching controller: {' '.join(cmd)}")
+                
+                # Launch with proper environment - don't capture output so window can display
+                # Use CREATE_NEW_CONSOLE on Windows, or detach on Linux
+                creation_flags = 0
+                if platform.system() == "Windows":
+                    import subprocess as sp
+                    creation_flags = sp.CREATE_NEW_CONSOLE
+                
+                # Prepare environment - ensure DISPLAY is set for GUI on Linux
+                env = os.environ.copy()
+                if platform.system() != "Windows":
+                    # Ensure DISPLAY is set for GUI applications
+                    if 'DISPLAY' not in env:
+                        # Try to get DISPLAY from current process
+                        display = os.environ.get('DISPLAY')
+                        if display:
+                            env['DISPLAY'] = display
+                
+                # For debugging: temporarily capture stderr to see errors
+                # TODO: Remove stderr capture once issue is resolved
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=str(script_path.parent),
+                    stdout=None,  # Don't capture - let it display in its own window
+                    stderr=subprocess.PIPE,  # Temporarily capture to see errors
+                    stdin=None,   # Don't capture stdin
+                    env=env,  # Pass environment with DISPLAY
+                    creationflags=creation_flags if platform.system() == "Windows" else 0,
+                    start_new_session=True if platform.system() != "Windows" else False
+                )
+            
+            # Give process a moment to start and check if it's still running
+            import time
+            time.sleep(0.2)  # Small delay to let process initialize
+            
+            # Verify process started successfully
+            if process.poll() is not None:
+                # Process already terminated (error)
+                error_msg = f"Controller process exited immediately with code {process.returncode}"
+                print(f"Error launching controller: {error_msg}")
+                # Try to read stderr to see what went wrong
+                try:
+                    stderr_output = process.stderr.read().decode('utf-8', errors='ignore')
+                    if stderr_output:
+                        print(f"Controller stderr output:\n{stderr_output}")
+                except:
+                    pass
+                return False
             
             self.controllers[robot_ip] = process
             self.controller_info[robot_ip] = {
@@ -168,8 +247,15 @@ class ControllerManager:
             }
             
             return True
+        except FileNotFoundError as e:
+            print(f"Error launching controller: File not found - {e}")
+            print(f"  Python executable: {sys.executable}")
+            print(f"  Script path: {script_path}")
+            return False
         except Exception as e:
+            import traceback
             print(f"Error launching controller: {e}")
+            traceback.print_exc()
             return False
     
     def stop_controller(self, robot_ip: str):

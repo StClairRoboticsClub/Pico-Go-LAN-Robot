@@ -22,8 +22,11 @@ import sys
 import socket
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # Suppress pygame message
+# Configure SDL2 to allow joystick input without window focus
+os.environ['SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS'] = '1'  # Allow joystick events when window not focused
 import struct
 import subprocess
+import re
 from typing import Optional, List, Dict
 import pygame
 # Removed terminal/TUI imports - using pygame window instead
@@ -179,37 +182,175 @@ def test_robot_connection(ip: str, timeout: float = 1.0) -> bool:
         return False
 
 
+def query_robot_directly(ip: str, timeout: float = 1.0, debug: bool = False) -> Optional[Dict]:
+    """
+    Query a robot directly by IP address (bypasses broadcast discovery).
+    Useful when broadcast discovery fails but direct connection works.
+    
+    Args:
+        ip: Robot IP address to query
+        timeout: How long to wait for response (seconds)
+        debug: Enable debug output
+    
+    Returns:
+        Robot info dict if found, None otherwise
+    """
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Send discovery request directly to robot IP
+        discovery_msg = json.dumps({"cmd": "discover", "seq": 0}).encode()
+        sock.sendto(discovery_msg, (ip, ROBOT_PORT))
+        
+        if debug:
+            print(f"   📡 Direct query to {ip}:{ROBOT_PORT}")
+        
+        # Wait for response
+        try:
+            data, addr = sock.recvfrom(1024)
+            if debug:
+                print(f"   📥 Received response from {addr[0]}")
+            
+            response_str = data.decode('utf-8').strip()
+            if '\n' in response_str:
+                response_str = response_str.split('\n')[0]
+            response = json.loads(response_str)
+            
+            if response.get("type") == "robot_info":
+                robot_info = {
+                    "robot_id": response.get("robot_id", "?"),
+                    "hostname": response.get("hostname", "unknown"),
+                    "ip": ip,
+                    "version": response.get("version", "?"),
+                    "color": response.get("color", [255, 255, 255]),
+                    "calibration": response.get("calibration", {})
+                }
+                if debug:
+                    print(f"   ✅ Found robot: {robot_info['hostname']} (ID: {robot_info['robot_id']}) at {ip}")
+                sock.close()
+                return robot_info
+        except socket.timeout:
+            if debug:
+                print(f"   ⚠️  No response from {ip} (timeout)")
+        except Exception as e:
+            if debug:
+                print(f"   ⚠️  Error querying {ip}: {e}")
+        
+        sock.close()
+        return None
+    except Exception as e:
+        if debug:
+            print(f"   ❌ Failed to query {ip}: {e}")
+        return None
+
+
 def get_all_local_networks() -> List[str]:
     """
     Get all local network prefixes (excluding loopback and docker).
+    Uses multiple methods to detect networks for better reliability.
     
     Returns:
         List of network prefixes like ['10.42.0', '192.168.1', '10.55.81']
     """
     networks = []
+    seen_prefixes = set()
+    
+    # Method 1: Use 'ip addr' command (Linux)
     try:
-        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=2)
+        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=3)
         
         for line in result.stdout.split('\n'):
-            # Look for inet lines with scope global
-            if 'inet ' in line and 'scope global' in line:
-                ip = line.strip().split()[1].split('/')[0]
-                # Skip loopback, docker, and VPN tunnels
-                if not ip.startswith(('127.', '172.17.', '172.18.', '100.')):
-                    prefix = get_network_prefix(ip)
-                    if prefix not in networks:
-                        networks.append(prefix)
+            # Look for inet lines with scope global, dynamic, or link
+            if 'inet ' in line and ('scope global' in line or 'scope dynamic' in line or 'scope link' in line):
+                parts = line.strip().split()
+                # Find the inet address (format: "inet 192.168.1.100/24")
+                for i, part in enumerate(parts):
+                    if part == 'inet' and i + 1 < len(parts):
+                        ip_with_mask = parts[i + 1]
+                        ip = ip_with_mask.split('/')[0]
+                        # Skip loopback and docker networks
+                        # Keep VPN networks and all other private networks
+                        if not ip.startswith(('127.', '172.17.', '172.18.', '169.254.')):
+                            prefix = get_network_prefix(ip)
+                            if prefix not in seen_prefixes:
+                                networks.append(prefix)
+                                seen_prefixes.add(prefix)
+                        break
+    except Exception as e:
+        # Continue to other methods
+        pass
+    
+    # Method 2: Use Python socket to get primary interface (works on all platforms)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(1)
+        # Connect to external address to determine primary interface
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        prefix = get_network_prefix(local_ip)
+        if prefix not in seen_prefixes:
+            networks.insert(0, prefix)  # Put primary interface first
+            seen_prefixes.add(prefix)
     except:
         pass
     
-    # Fallback: common robot networks
+    # Method 3: Try netifaces library if available (more reliable)
+    try:
+        import netifaces
+        for interface in netifaces.interfaces():
+            try:
+                addrs = netifaces.ifaddresses(interface)
+                if netifaces.AF_INET in addrs:
+                    for addr_info in addrs[netifaces.AF_INET]:
+                        ip = addr_info.get('addr', '')
+                        if ip and not ip.startswith(('127.', '172.17.', '172.18.', '169.254.')):
+                            prefix = get_network_prefix(ip)
+                            if prefix not in seen_prefixes:
+                                networks.append(prefix)
+                                seen_prefixes.add(prefix)
+            except:
+                continue
+    except ImportError:
+        # netifaces not available, continue
+        pass
+    except Exception:
+        # Other error, continue
+        pass
+    
+    # Method 4: Try 'ifconfig' as fallback (older systems)
+    try:
+        result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=3)
+        # Look for IP addresses in ifconfig output
+        ip_pattern = r'inet (\d+\.\d+\.\d+\.\d+)'
+        for match in re.finditer(ip_pattern, result.stdout):
+            ip = match.group(1)
+            if not ip.startswith(('127.', '172.17.', '172.18.', '169.254.')):
+                prefix = get_network_prefix(ip)
+                if prefix not in seen_prefixes:
+                    networks.append(prefix)
+                    seen_prefixes.add(prefix)
+    except:
+        pass
+    
+    # Fallback: common robot networks if nothing found
+    # Include 192.168.8.x for phone hotspots (mentioned in README)
     if not networks:
-        networks = ['10.42.0', '192.168.1', '192.168.4']
+        networks = ['192.168.8', '192.168.1', '192.168.0', '10.0.0', '10.42.0', '192.168.4']
+    else:
+        # Always include common networks as fallback (in case detection missed one)
+        common_networks = ['192.168.8', '192.168.1', '192.168.0', '10.0.0', '10.42.0', '192.168.4']
+        for common in common_networks:
+            if common not in seen_prefixes:
+                networks.append(common)
+                seen_prefixes.add(common)
     
     return networks
 
 
-def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
+def discover_robots_on_network(timeout: float = 1.5, debug: bool = False) -> List[Dict]:
     """
     Broadcast discovery request and collect robot responses.
     Scans ALL local network interfaces to find robots.
@@ -223,57 +364,192 @@ def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
     robots = []
     
     try:
-        # Create UDP socket for broadcast
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
-        sock.settimeout(0.3)  # 300ms timeout for receives (faster)
-        
-        # IMPORTANT: Bind socket to receive responses
-        # Bind to 0.0.0.0 (all interfaces) on any available port
-        try:
-            sock.bind(('0.0.0.0', 0))  # Bind to all interfaces, OS chooses port
-        except OSError:
-            # If binding fails, try without binding (some systems allow this)
-            pass
-        
-        # Get ALL local networks (not just one!)
+        # Get ALL local networks first
         networks = get_all_local_networks()
+        
+        if debug:
+            print(f"   🔍 Detected networks: {networks}")
         
         if not networks:
             # Fallback: try common network prefixes if detection fails
-            networks = ["192.168.1", "192.168.0", "10.0.0", "172.16.0"]
+            networks = ["192.168.1", "192.168.0", "10.0.0", "172.16.0", "10.42.0", "192.168.4"]
+            if debug:
+                print(f"   ⚠️  Using fallback networks: {networks}")
+        
+        # Get primary network interface IP for binding (if possible)
+        primary_ip = None
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            primary_ip = s.getsockname()[0]
+            s.close()
+        except:
+            pass
+        
+        # Create UDP socket for broadcast
+        sock = None
+        bound = False
+        
+        # Try multiple approaches to create and bind socket
+        for attempt in range(3):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
+                
+                # Increase receive buffer size for better reliability
+                try:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)  # 64KB buffer
+                except (AttributeError, OSError):
+                    pass
+                
+                # On Linux, also try SO_REUSEPORT if available
+                try:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except (AttributeError, OSError):
+                    # SO_REUSEPORT not available on this system, continue
+                    pass
+                
+                # IMPORTANT: Bind socket to receive responses
+                # Try binding to all interfaces first (better for receiving broadcast responses),
+                # then fall back to primary interface if needed
+                bind_addresses = []
+                bind_addresses.append(('0.0.0.0', 0))  # Bind to all interfaces (preferred for broadcasts)
+                if primary_ip:
+                    bind_addresses.append((primary_ip, 0))  # Bind to primary interface (fallback)
+                
+                # Try binding to a specific port first, then fall back to OS-chosen port
+                for bind_addr, _ in bind_addresses:
+                    for port in [8766, 8767, 8768, 8769, 0]:  # Try multiple ports
+                        try:
+                            sock.bind((bind_addr, port))
+                            bound = True
+                            if debug:
+                                print(f"   ✅ Socket bound to {bind_addr}:{port}")
+                            break
+                        except OSError as e:
+                            if debug and attempt == 0:
+                                print(f"   ⚠️  Failed to bind to {bind_addr}:{port}: {e}")
+                            continue
+                    if bound:
+                        break
+                
+                if bound:
+                    break
+                    
+            except Exception as e:
+                if debug:
+                    print(f"   ⚠️  Socket creation attempt {attempt + 1} failed: {e}")
+                if sock:
+                    try:
+                        sock.close()
+                    except:
+                        pass
+                sock = None
+                continue
+        
+        if not bound or not sock:
+            if debug:
+                print(f"   ❌ Failed to create/bind socket after all attempts")
+            return []
+        
+        # Set initial timeout for receiving responses (will be adjusted in loop)
+        sock.settimeout(0.5)  # 500ms initial timeout
         
         # Send discovery to all networks (optimized - broadcast only, no individual IP scan)
         discovery_msg = json.dumps({"cmd": "discover", "seq": 0}).encode()
         
-        # Also try global broadcast as fallback
-        try:
-            sock.sendto(discovery_msg, ('255.255.255.255', ROBOT_PORT))
-        except:
-            pass
-        
+        # Send broadcasts to all detected networks
+        broadcasts_sent = 0
         for network_prefix in networks:
-            # Broadcast only (much faster than scanning 254 IPs per network)
+            # Broadcast to network broadcast address
             broadcast_addr = f"{network_prefix}.255"
             try:
                 sock.sendto(discovery_msg, (broadcast_addr, ROBOT_PORT))
-            except:
-                pass
+                broadcasts_sent += 1
+                if debug:
+                    print(f"   📡 Sent discovery to {broadcast_addr}:{ROBOT_PORT}")
+            except OSError as e:
+                # Network error - continue to next network
+                if debug:
+                    print(f"   ⚠️  Failed to send to {broadcast_addr}: {e}")
+                continue
+            except Exception as e:
+                # Other error - continue
+                if debug:
+                    print(f"   ⚠️  Error sending to {broadcast_addr}: {e}")
+                continue
         
-        # Collect responses
+        # Also try global broadcast as fallback (may not work on all systems)
+        try:
+            sock.sendto(discovery_msg, ('255.255.255.255', ROBOT_PORT))
+            broadcasts_sent += 1
+            if debug:
+                print(f"   📡 Sent discovery to 255.255.255.255:{ROBOT_PORT}")
+        except Exception as e:
+            if debug:
+                print(f"   ⚠️  Failed to send global broadcast: {e}")
+        
+        if broadcasts_sent == 0:
+            if debug:
+                print(f"   ❌ No broadcasts sent - check network configuration")
+            sock.close()
+            return []
+        
+        # Small delay to allow broadcasts to propagate and robots to respond
+        time.sleep(0.1)
+        
+        # Collect responses with longer timeout
         start_time = time.time()
         seen_ips = set()
+        last_receive_time = start_time
         
+        if debug:
+            print(f"   ⏳ Listening for responses (timeout: {timeout}s)...")
+        
+        # Keep receiving until timeout, but also check if we got responses recently
         while time.time() - start_time < timeout:
             try:
+                # Calculate remaining timeout
+                elapsed = time.time() - start_time
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    break
+                
+                # Set socket timeout to remaining time or 500ms, whichever is smaller
+                # Increased from 200ms to 500ms for better reliability
+                sock.settimeout(min(0.5, remaining))
+                
                 data, addr = sock.recvfrom(1024)
-                response = json.loads(data.decode().strip())
+                
+                if debug:
+                    print(f"   📥 Received data from {addr[0]}:{addr[1]} ({len(data)} bytes)")
+                
+                # Try to decode JSON - handle multiple formats
+                try:
+                    response_str = data.decode('utf-8').strip()
+                    # Handle responses that might have newlines or extra data
+                    if '\n' in response_str:
+                        # Take first line if multiple lines
+                        response_str = response_str.split('\n')[0]
+                    response = json.loads(response_str)
+                except UnicodeDecodeError as e:
+                    if debug:
+                        print(f"   ⚠️  Unicode decode error from {addr[0]}: {e}")
+                    continue
+                except json.JSONDecodeError as e:
+                    if debug:
+                        print(f"   ⚠️  JSON decode error from {addr[0]}: {e}")
+                        print(f"      Data: {data[:100]}")
+                    continue
                 
                 robot_ip = addr[0]
                 
                 # Avoid duplicates
                 if robot_ip in seen_ips:
+                    if debug:
+                        print(f"   ⚠️  Duplicate response from {robot_ip}, skipping")
                     continue
                 seen_ips.add(robot_ip)
                 
@@ -287,25 +563,57 @@ def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
                         "calibration": response.get("calibration", {})  # Calibration data
                     }
                     robots.append(robot_info)
+                    last_receive_time = time.time()
+                    if debug:
+                        print(f"   ✅ Found robot: {robot_info['hostname']} (ID: {robot_info['robot_id']}) at {robot_ip}")
+                else:
+                    if debug:
+                        print(f"   ⚠️  Unexpected response type from {robot_ip}: {response.get('type')}")
                     
             except socket.timeout:
+                # No data received in timeout period - continue waiting
+                # Don't print on every timeout to avoid spam
                 continue
-            except json.JSONDecodeError:
-                # Invalid JSON response, skip
+            except OSError as e:
+                # Network errors - log but continue
+                if debug:
+                    print(f"   ⚠️  Network error receiving data: {e}")
                 continue
             except Exception as e:
-                # Silently continue on other errors
+                # Continue on other errors (connection reset, etc.)
+                if debug:
+                    print(f"   ⚠️  Error processing response: {e}")
                 continue
         
-        sock.close()
+        if sock:
+            try:
+                sock.close()
+            except:
+                pass
+        
+        if debug:
+            if robots:
+                print(f"   ✅ Discovery complete: Found {len(robots)} robot(s)")
+            else:
+                print(f"   ⚠️  No robots found. Check:")
+                print(f"      - Robots are powered on and connected to WiFi")
+                print(f"      - Same network as computer")
+                print(f"      - Firewall allows UDP port {ROBOT_PORT} (incoming and outgoing)")
+                print(f"      - UDP broadcasts are enabled")
+                print(f"      - Try manually adding robot IP if discovery fails")
+                if broadcasts_sent > 0:
+                    print(f"   💡 TIP: Broadcasts were sent successfully but no responses received.")
+                    print(f"      This usually indicates a firewall blocking INCOMING UDP on port {ROBOT_PORT}.")
+                    print(f"      Run: controller/fix_firewall.sh to fix firewall rules")
         
         return robots
     
     except Exception as e:
         # Print error for debugging
         import traceback
-        print(f"   ❌ Discovery error: {e}")
-        traceback.print_exc()
+        if debug:
+            print(f"   ❌ Discovery error: {e}")
+            traceback.print_exc()
         return []
 
 
@@ -592,6 +900,8 @@ class DisplayController:
     
     def __init__(self):
         """Initialize pygame display window."""
+        # Set SDL environment to allow joystick input without window focus
+        os.environ['SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS'] = '1'
         pygame.init()
         
         # Window configuration
@@ -605,8 +915,13 @@ class DisplayController:
         self.error_color = (255, 100, 100)  # Red
         
         # Create window
+        # Note: Keyboard input requires window focus (pygame limitation)
+        # Gamepad input should work without focus on Linux, but may require focus on some systems
         self.screen = pygame.display.set_mode((self.window_width, self.window_height))
         pygame.display.set_caption("🤖 Pico-Go LAN Robot Controller")
+        
+        # Ensure window is visible immediately
+        pygame.display.flip()
         
         # Set up fonts
         pygame.font.init()
@@ -914,7 +1229,10 @@ class DisplayController:
         y += 40
         
         # Instructions
-        info_text = self.small_font.render("Keep this window focused to control the robot", True, (150, 150, 150))
+        if self.controller_type == "Keyboard":
+            info_text = self.small_font.render("⚠️ Keep this window FOCUSED for keyboard input", True, self.warning_color)
+        else:
+            info_text = self.small_font.render("⚠️ Keep this window FOCUSED for gamepad input", True, self.warning_color)
         self.screen.blit(info_text, (20, y))
         y += 20
         info_text2 = self.small_font.render("Click profile dropdown to change robot profile", True, (150, 150, 150))
@@ -1088,6 +1406,8 @@ class XboxController:
         Args:
             joystick_index: Index of the joystick to use (0-7). Defaults to 0.
         """
+        # Set SDL environment to allow joystick input without window focus
+        os.environ['SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS'] = '1'
         pygame.init()
         pygame.joystick.init()
         
@@ -1139,6 +1459,8 @@ class XboxController:
             return 0.0, 0.0
         
         # Update pygame events to get latest joystick state
+        # Note: On some systems, joystick input may require window focus
+        # SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS is set to try to allow background input
         pygame.event.pump()
         
         def _process_trigger(raw_axis: float) -> float:
@@ -1392,15 +1714,30 @@ class ControllerApp:
         self.joystick_index = joystick_index
         
         # Always create display window
-        self.display = DisplayController()
+        try:
+            self.display = DisplayController()
+            # Force window to be visible
+            pygame.display.flip()
+        except Exception as e:
+            print(f"❌ Error creating display window: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
-        # Try Xbox controller first, fall back to keyboard
-        self.controller = XboxController(joystick_index=joystick_index)
-        self.controller_type = "Xbox"
-        
-        if not self.controller.is_connected():
+        # Check if keyboard was explicitly requested (joystick_index = -1)
+        # Otherwise, try the specified gamepad
+        if joystick_index == -1:
+            # Keyboard explicitly requested - use keyboard directly
             self.controller = KeyboardController()
             self.controller_type = "Keyboard"
+        else:
+            # Try Xbox controller first, fall back to keyboard if not connected
+            self.controller = XboxController(joystick_index=joystick_index)
+            self.controller_type = "Xbox"
+            
+            if not self.controller.is_connected():
+                self.controller = KeyboardController()
+                self.controller_type = "Keyboard"
         
         # Initialize robot_id first (will be set from discovery later)
         self.robot_id = None  # Will be set from discovery
@@ -1696,6 +2033,16 @@ class ControllerApp:
         """Run the controller application."""
         self.running = True
         
+        # Ensure display window is visible immediately
+        try:
+            self.display._draw_ui()
+            pygame.display.flip()
+            print("✅ Controller window opened")
+        except Exception as e:
+            print(f"❌ Error showing display window: {e}")
+            import traceback
+            traceback.print_exc()
+        
         # Connect to robot (silent - status shown in pygame window)
         while self.running and not self.connection.connected:
             if not await self.connection.connect():
@@ -1771,11 +2118,13 @@ class ControllerApp:
                 now = time.time()
                 
                 if now >= next_update_time:
-                    # Get controller input
+                    # Get controller input (always get input to show in display)
                     throttle, steer = self.controller.get_axes()
                     
                     # Send command
-                    if await self.connection.send_drive_command(throttle, steer):
+                    send_success = await self.connection.send_drive_command(throttle, steer)
+                    
+                    if send_success:
                         self.packets_sent += 1
                         
                         # Track Hz (rolling average) - same calculation for terminal and display
@@ -1789,32 +2138,48 @@ class ControllerApp:
                                 
                                 # Calculate average Hz (same for both displays)
                                 avg_hz = sum(self.hz_history) / len(self.hz_history) if self.hz_history else 0.0
-                                
-                                # Update display
-                                runtime = now - self.start_time
-                                self.display.update(
-                                    throttle=throttle,
-                                    steer=steer,
-                                    hz=avg_hz,
-                                    packets_sent=self.packets_sent,
-                                    runtime=runtime,
-                                    connected=True
-                                )
-                                
-                                # Terminal status removed - all info shown in pygame window
-                                # This prevents interference with terminal input for commands
+                            else:
+                                avg_hz = 0.0
+                        else:
+                            # First packet - no Hz yet
+                            avg_hz = 0.0
                         
                         self.last_send_time = now
                     else:
                         # Connection lost - try to reconnect
-                        self.display.update(connected=False)
+                        # Keep showing last Hz value or 0.0
+                        if self.hz_history:
+                            avg_hz = sum(self.hz_history) / len(self.hz_history)
+                        else:
+                            avg_hz = 0.0
+                        
                         # Only print error to terminal, status shown in pygame window
                         print("⚠️  ERROR: Connection lost - Reconnecting...")
                         if not await self.connection.connect():
                             await asyncio.sleep(RECONNECT_DELAY)
+                            # Update display with disconnected status before continuing
+                            runtime = now - self.start_time
+                            self.display.update(
+                                throttle=throttle,
+                                steer=steer,
+                                hz=avg_hz,
+                                packets_sent=self.packets_sent,
+                                runtime=runtime,
+                                connected=False
+                            )
                             continue
-                        self.display.update(connected=True)
                         # Reconnection success shown in pygame window
+                    
+                    # Always update display with current input values and status
+                    runtime = now - self.start_time
+                    self.display.update(
+                        throttle=throttle,
+                        steer=steer,
+                        hz=avg_hz,
+                        packets_sent=self.packets_sent,
+                        runtime=runtime,
+                        connected=send_success
+                    )
                     
                     # Schedule next update precisely
                     next_update_time += self.control_rate
@@ -1931,22 +2296,53 @@ def main():
         sys.exit(0)
     
     # Parse joystick index from command line (optional, defaults to 0)
+    # -1 = keyboard explicitly, 0-7 = gamepad indices
     joystick_index = 0
     if len(sys.argv) > 2:
         try:
             joystick_index = int(sys.argv[2])
-            if joystick_index < 0 or joystick_index > 7:
-                print(f"⚠️  Warning: Joystick index {joystick_index} out of range (0-7). Using 0.")
+            # Allow -1 for keyboard, 0-7 for gamepads
+            if joystick_index < -1 or joystick_index > 7:
+                print(f"⚠️  Warning: Joystick index {joystick_index} out of range (-1 to 7). Using 0.")
                 joystick_index = 0
         except ValueError:
             print(f"⚠️  Warning: Invalid joystick index '{sys.argv[2]}'. Using 0.")
             joystick_index = 0
     
+    # Parse robot_id from command line (optional, third argument)
+    # If provided, use it; otherwise try to discover it
+    if len(sys.argv) > 3:
+        try:
+            robot_id = int(sys.argv[3])
+        except ValueError:
+            print(f"⚠️  Warning: Invalid robot_id '{sys.argv[3]}'. Will try to discover.")
+            robot_id = None
+    
+    # If robot_id still not set, try to discover it
+    if robot_id is None:
+        robots = discover_robots_on_network(timeout=1.0)
+        for robot in robots:
+            if robot['ip'] == robot_ip:
+                robot_id = robot['robot_id']
+                break
+    
+    # Ensure robot_id is an integer if set (for profile changes)
+    if robot_id is not None:
+        try:
+            robot_id = int(robot_id)
+        except (ValueError, TypeError):
+            print(f"⚠️  Warning: Invalid robot_id type '{robot_id}'. Profile changes may not work.")
+            robot_id = None
+    
     # Create and run application
     app = ControllerApp(robot_ip, joystick_index=joystick_index)
     
-    # Store robot_id for connection message
+    # Store robot_id for connection message and profile changes
     app.robot_id = robot_id
+    
+    # Update display with robot_id if available (so profile dropdown works)
+    if robot_id is not None:
+        app.display.update(robot_id=robot_id, current_profile_id=robot_id)
     
     # If we discovered the robot, apply calibration from discovery
     # (Otherwise it will be requested during connection)
