@@ -131,6 +131,9 @@ class RobotMasterGUI:
         
         # Auto-scan on startup
         self.root.after(500, self._auto_scan_startup)
+        
+        # Update gamepad list periodically
+        self.root.after(2000, self._periodic_gamepad_update)
     
     def _setup_menu(self):
         """Setup menu bar."""
@@ -167,13 +170,23 @@ class RobotMasterGUI:
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Network info panel
-        network_frame = ctk.CTkFrame(main_frame)
-        network_frame.pack(fill="x", padx=10, pady=10)
+        # Top info panel (network and gamepads)
+        top_info_frame = ctk.CTkFrame(main_frame)
+        top_info_frame.pack(fill="x", padx=10, pady=10)
         
+        # Network info
         network_info = self.config.get_network_config()
-        ctk.CTkLabel(network_frame, text=f"Network: {network_info.get('ssid', 'Unknown')}", 
+        ctk.CTkLabel(top_info_frame, text=f"Network: {network_info.get('ssid', 'Unknown')}", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=10, pady=5)
+        
+        # Gamepad info
+        self.gamepad_info_label = ctk.CTkLabel(top_info_frame, text="Gamepads: 0 detected", 
+                                             font=ctk.CTkFont(size=12))
+        self.gamepad_info_label.pack(side="right", padx=10, pady=5)
+        
+        # Refresh gamepad button
+        ctk.CTkButton(top_info_frame, text="Refresh Gamepads", 
+                     command=self._update_gamepad_list, width=120).pack(side="right", padx=5)
         
         # Robot list
         list_frame = ctk.CTkFrame(main_frame)
@@ -282,8 +295,40 @@ class RobotMasterGUI:
             return ip.strip()
         return None
     
-    def _launch_controller(self):
-        """Launch controller for selected robot."""
+    def _update_gamepad_list(self):
+        """Update list of available gamepads."""
+        if not PYGAME_AVAILABLE:
+            self.available_gamepads = 0
+            self.gamepad_names = {}
+            self.gamepad_info_label.configure(text="Gamepads: pygame not available")
+            return
+        
+        try:
+            pygame.joystick.quit()
+            pygame.joystick.init()
+            
+            count = pygame.joystick.get_count()
+            self.available_gamepads = count
+            self.gamepad_names = {}
+            
+            for i in range(count):
+                try:
+                    joystick = pygame.joystick.Joystick(i)
+                    joystick.init()
+                    name = joystick.get_name()
+                    self.gamepad_names[i] = name
+                except:
+                    self.gamepad_names[i] = f"Gamepad {i}"
+            
+            if count == 0:
+                self.gamepad_info_label.configure(text="Gamepads: 0 detected")
+            else:
+                self.gamepad_info_label.configure(text=f"Gamepads: {count} detected")
+        except Exception as e:
+            self.gamepad_info_label.configure(text=f"Gamepads: Error ({str(e)[:20]})")
+    
+    def _launch_controller_with_gamepad(self):
+        """Launch controller for selected robot with gamepad selection."""
         robot_ip = self._get_selected_robot_ip()
         if not robot_ip:
             messagebox.showwarning("No Selection", "Please select a robot first.")
@@ -293,15 +338,109 @@ class RobotMasterGUI:
             messagebox.showinfo("Already Running", f"Controller already running for {robot_ip}")
             return
         
+        # Check if gamepad already assigned
+        if robot_ip in self.robot_gamepad_assignments:
+            # Use existing assignment
+            joystick_index = self.robot_gamepad_assignments[robot_ip]
+        else:
+            # Auto-assign next available gamepad
+            self._update_gamepad_list()
+            used_indices = set(self.robot_gamepad_assignments.values())
+            joystick_index = None
+            
+            # Find first available gamepad
+            for i in range(self.available_gamepads):
+                if i not in used_indices:
+                    joystick_index = i
+                    break
+            
+            # If no gamepads available, show dialog
+            if joystick_index is None:
+                joystick_index = self._select_gamepad_dialog()
+                if joystick_index is None:
+                    return  # User cancelled
+        
+        # Store assignment
+        self.robot_gamepad_assignments[robot_ip] = joystick_index
+        
         # Get robot ID if available
         robot_id = None
         if robot_ip in self.discovered_robots:
             robot_id = self.discovered_robots[robot_ip].get('robot_id')
         
-        if self.controller_manager.launch_controller(robot_ip, robot_id, "xbox"):
-            messagebox.showinfo("Success", f"Controller launched for {robot_ip}")
+        # Launch controller with assigned gamepad
+        if self.controller_manager.launch_controller(robot_ip, robot_id, "xbox", joystick_index):
+            gamepad_name = self.gamepad_names.get(joystick_index, f"Gamepad {joystick_index}")
+            messagebox.showinfo("Success", f"Controller launched for {robot_ip}\nUsing: {gamepad_name}")
+            # Refresh robot list to show gamepad assignment
+            self._scan_robots()
         else:
             messagebox.showerror("Error", f"Failed to launch controller for {robot_ip}")
+    
+    def _select_gamepad_dialog(self) -> Optional[int]:
+        """Show dialog to select a gamepad."""
+        if self.available_gamepads == 0:
+            messagebox.showwarning("No Gamepads", "No gamepads detected. Controller will use keyboard input.")
+            return 0  # Default to 0, will fall back to keyboard
+        
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Select Gamepad")
+        dialog.geometry("400x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        result = [None]  # Use list to allow modification in nested function
+        
+        ctk.CTkLabel(dialog, text="Select gamepad for this robot:", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        
+        # Gamepad list
+        listbox_frame = ctk.CTkFrame(dialog)
+        listbox_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        gamepad_listbox = tk.Listbox(listbox_frame, height=8, font=("Arial", 11))
+        gamepad_listbox.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        for i in range(self.available_gamepads):
+            name = self.gamepad_names.get(i, f"Gamepad {i}")
+            # Check if already assigned
+            assigned_to = None
+            for ip, idx in self.robot_gamepad_assignments.items():
+                if idx == i:
+                    assigned_to = ip
+                    break
+            
+            if assigned_to:
+                display_text = f"Gamepad {i}: {name} [Assigned to {assigned_to}]"
+            else:
+                display_text = f"Gamepad {i}: {name} [Available]"
+            
+            gamepad_listbox.insert(tk.END, display_text)
+        
+        # Buttons
+        button_frame = ctk.CTkFrame(dialog)
+        button_frame.pack(fill="x", padx=20, pady=10)
+        
+        def select_gamepad():
+            selection = gamepad_listbox.curselection()
+            if selection:
+                result[0] = selection[0]
+                dialog.destroy()
+            else:
+                messagebox.showwarning("No Selection", "Please select a gamepad.")
+        
+        def cancel():
+            dialog.destroy()
+        
+        ctk.CTkButton(button_frame, text="Select", command=select_gamepad).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Cancel", command=cancel).pack(side="left", padx=5)
+        
+        dialog.wait_window()
+        return result[0]
+    
+    def _launch_controller(self):
+        """Launch controller for selected robot (legacy method, redirects to new method)."""
+        self._launch_controller_with_gamepad()
     
     def _launch_calibration(self):
         """Launch calibration tool for selected robot."""
