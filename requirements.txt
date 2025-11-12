@@ -4,7 +4,6 @@
 
 # Core controller dependencies
 pygame>=2.5.0
-asyncio-compat>=0.1.2
 
 # GUI Framework (for robot_master_gui.py)
 customtkinter>=5.2.0
