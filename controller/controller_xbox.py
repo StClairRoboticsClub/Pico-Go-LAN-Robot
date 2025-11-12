@@ -226,13 +226,32 @@ def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
         # Create UDP socket for broadcast
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
         sock.settimeout(0.3)  # 300ms timeout for receives (faster)
+        
+        # IMPORTANT: Bind socket to receive responses
+        # Bind to 0.0.0.0 (all interfaces) on any available port
+        try:
+            sock.bind(('0.0.0.0', 0))  # Bind to all interfaces, OS chooses port
+        except OSError:
+            # If binding fails, try without binding (some systems allow this)
+            pass
         
         # Get ALL local networks (not just one!)
         networks = get_all_local_networks()
         
+        if not networks:
+            # Fallback: try common network prefixes if detection fails
+            networks = ["192.168.1", "192.168.0", "10.0.0", "172.16.0"]
+        
         # Send discovery to all networks (optimized - broadcast only, no individual IP scan)
         discovery_msg = json.dumps({"cmd": "discover", "seq": 0}).encode()
+        
+        # Also try global broadcast as fallback
+        try:
+            sock.sendto(discovery_msg, ('255.255.255.255', ROBOT_PORT))
+        except:
+            pass
         
         for network_prefix in networks:
             # Broadcast only (much faster than scanning 254 IPs per network)
@@ -271,7 +290,11 @@ def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
                     
             except socket.timeout:
                 continue
+            except json.JSONDecodeError:
+                # Invalid JSON response, skip
+                continue
             except Exception as e:
+                # Silently continue on other errors
                 continue
         
         sock.close()
@@ -279,7 +302,10 @@ def discover_robots_on_network(timeout: float = 1.5) -> List[Dict]:
         return robots
     
     except Exception as e:
+        # Print error for debugging
+        import traceback
         print(f"   ❌ Discovery error: {e}")
+        traceback.print_exc()
         return []
 
 

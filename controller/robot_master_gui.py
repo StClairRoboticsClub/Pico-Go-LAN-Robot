@@ -241,13 +241,18 @@ class RobotMasterGUI:
         self.robot_listbox.insert(0, "Scanning for robots...")
         self.root.update()
         
-        robots = discover_robots_on_network(timeout=2.0)
+        # Increase timeout for better reliability
+        robots = discover_robots_on_network(timeout=3.0)
         self.discovered_robots = {robot['ip']: robot for robot in robots}
         
         self.robot_listbox.delete(0, tk.END)
         
         if not robots:
-            self.robot_listbox.insert(0, "No robots found. Check network connection.")
+            self.robot_listbox.insert(0, "No robots found. Check:")
+            self.robot_listbox.insert(1, "  - Robots are powered on")
+            self.robot_listbox.insert(2, "  - Same WiFi network")
+            self.robot_listbox.insert(3, "  - Firewall allows UDP port 8765")
+            self.robot_listbox.insert(4, "  - Try 'Add Robot' to enter IP manually")
         else:
             for robot in robots:
                 robot_id = robot.get('robot_id', '?')
